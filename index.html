@@ -1,0 +1,1627 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0">
+<title>Abstellkammer</title>
+<style>
+@import url('https://fonts.googleapis.com/css2?family=Oswald:wght@500;600;700&family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@500;700&display=swap');
+
+:root{
+  --bg:#efe8d8;
+  --surface:#fffdf8;
+  --surface-alt:#f7f1e3;
+  --ink:#2b2420;
+  --ink-soft:#7a6f5f;
+  --accent:#c98a2b;
+  --accent-soft:#efd9ae;
+  --sage:#6b8068;
+  --sage-soft:#dde5d9;
+  --danger:#b8493c;
+  --danger-soft:#f0d8d3;
+  --border:#ddd3bc;
+}
+
+*{box-sizing:border-box; -webkit-tap-highlight-color:transparent;}
+html,body{margin:0;padding:0;}
+body{
+  background:var(--bg);
+  background-image:radial-gradient(circle at 1px 1px, rgba(43,36,32,0.06) 1px, transparent 0);
+  background-size:18px 18px;
+  color:var(--ink);
+  font-family:'Inter',sans-serif;
+  min-height:100vh;
+  padding-bottom:100px;
+}
+
+.wrap{max-width:520px; margin:0 auto; padding:16px 14px 0;}
+
+header{padding:14px 4px 10px; position:sticky; top:0; z-index:20; background:var(--bg);}
+h1{font-family:'Oswald',sans-serif; font-weight:700; font-size:26px; letter-spacing:0.5px; text-transform:uppercase; margin:0 0 12px;}
+
+.search-box{display:flex; align-items:center; gap:8px; background:var(--surface); border:1.5px solid var(--border); border-radius:10px; padding:9px 12px;}
+.search-box input{border:none; outline:none; background:transparent; font-family:'Inter',sans-serif; font-size:14.5px; color:var(--ink); width:100%;}
+.search-box input::placeholder{color:var(--ink-soft);}
+.search-icon{font-size:14px; color:var(--ink-soft); flex:0 0 auto;}
+
+.stats-row{display:flex; gap:6px; margin-top:10px; flex-wrap:wrap;}
+.stat-pill{font-family:'JetBrains Mono',monospace; font-size:10.5px; background:var(--surface-alt); border:1px solid var(--border); border-radius:20px; padding:4px 9px; color:var(--ink-soft);}
+
+main{padding:8px 4px 0;}
+
+.empty-state{text-align:center; padding:60px 20px; color:var(--ink-soft);}
+.empty-state .big{font-size:38px; margin-bottom:10px;}
+.empty-state .msg{font-size:14.5px; line-height:1.5;}
+
+/* ---- Shelf (Regal) ---- */
+.shelf{background:var(--surface); border:1.5px solid var(--border); border-radius:12px; margin-bottom:12px; overflow:hidden;}
+.shelf-header{display:flex; align-items:center; gap:10px; padding:13px 14px; cursor:pointer; user-select:none;}
+.shelf-tag-hole{width:9px; height:9px; border-radius:50%; background:var(--bg); border:1.5px solid var(--ink-soft); flex:0 0 auto;}
+.shelf-name{font-family:'Oswald',sans-serif; font-weight:600; font-size:16.5px; letter-spacing:0.3px; flex:1; min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;}
+.shelf-name input{font-family:'Oswald',sans-serif; font-weight:600; font-size:16.5px; border:none; border-bottom:1.5px dashed var(--accent); background:transparent; outline:none; width:100%; color:var(--ink);}
+.shelf-count{font-family:'JetBrains Mono',monospace; font-size:11.5px; color:var(--ink-soft); background:var(--surface-alt); border-radius:20px; padding:3px 9px; flex:0 0 auto;}
+.chevron{font-size:12px; color:var(--ink-soft); transition:transform 0.2s ease; flex:0 0 auto;}
+.open > .shelf-header .chevron, .board.open .board-header .chevron{transform:rotate(90deg);}
+.shelf-actions{display:flex; gap:6px; flex:0 0 auto;}
+.icon-btn{border:none; background:transparent; cursor:pointer; font-size:14px; padding:4px 6px; border-radius:6px; color:var(--ink-soft); line-height:1;}
+.icon-btn:hover{background:var(--surface-alt); color:var(--ink);}
+.icon-btn.danger:hover{background:var(--danger-soft); color:var(--danger);}
+.shelf-body{display:none; border-top:1px dashed var(--border); padding:8px 10px 10px;}
+.shelf.open .shelf-body{display:block;}
+.shelf-hint{font-family:'JetBrains Mono',monospace; font-size:10.5px; color:var(--ink-soft); padding:2px 4px 8px;}
+
+/* ---- Board (Brett) ---- */
+.board{margin:0 0 8px 6px; border-left:2px solid var(--border); padding-left:10px;}
+.board-header{display:flex; align-items:center; gap:9px; padding:6px 4px; cursor:pointer; user-select:none;}
+.board-badge{width:24px; height:24px; border-radius:50%; background:var(--accent-soft); color:var(--accent); font-family:'JetBrains Mono',monospace; font-weight:700; font-size:12px; display:flex; align-items:center; justify-content:center; flex:0 0 auto;}
+.board-label{font-family:'Oswald',sans-serif; font-weight:600; font-size:13.5px; color:var(--ink-soft); flex:1;}
+.board-count{font-family:'JetBrains Mono',monospace; font-size:10.5px; color:var(--ink-soft); background:var(--surface-alt); border-radius:20px; padding:2px 8px; flex:0 0 auto;}
+.board-body{display:none; padding:2px 2px 6px;}
+.board.open .board-body{display:block;}
+
+.confirm-row{display:flex; align-items:center; gap:8px; flex-wrap:wrap; background:var(--danger-soft); border-radius:8px; padding:6px 10px; font-size:12.5px; color:var(--danger); margin:6px 0;}
+.confirm-row button{border:none; border-radius:6px; padding:4px 9px; font-size:12px; font-weight:600; cursor:pointer; font-family:'Inter',sans-serif;}
+.confirm-yes{background:var(--danger); color:#fff;}
+.confirm-no{background:transparent; color:var(--ink-soft);}
+
+/* ---- Item ---- */
+.item-row{display:flex; align-items:flex-start; gap:8px; padding:8px 4px; border-bottom:1px solid var(--surface-alt);}
+.item-row:last-child{border-bottom:none;}
+.item-thumb{width:36px; height:36px; border-radius:8px; object-fit:cover; flex:0 0 auto; border:1px solid var(--border); cursor:pointer; background:var(--surface-alt);}
+.item-thumb-placeholder{width:36px; height:36px; border-radius:8px; flex:0 0 auto; background:var(--surface-alt); border:1px dashed var(--border); display:flex; align-items:center; justify-content:center; font-size:14px; color:var(--ink-soft);}
+.item-main{flex:1; min-width:0; padding-top:1px;}
+.item-top-line{display:flex; align-items:center; gap:6px; flex-wrap:wrap;}
+.item-name{font-size:14.5px; font-weight:500; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;}
+.reihe-badge{font-family:'JetBrains Mono',monospace; font-size:10px; color:var(--sage); background:var(--sage-soft); padding:1px 6px; border-radius:10px; flex:0 0 auto;}
+.item-note{font-size:12px; color:var(--ink-soft); margin-top:1px;}
+.qty-stepper{display:flex; align-items:center; background:var(--surface-alt); border-radius:8px; flex:0 0 auto;}
+.qty-stepper button{border:none; background:transparent; cursor:pointer; width:24px; height:24px; font-size:14px; color:var(--accent); font-weight:700;}
+.qty-val{font-family:'JetBrains Mono',monospace; font-weight:700; font-size:13px; min-width:22px; text-align:center;}
+.qty-low .qty-val{color:var(--danger);}
+.item-actions{display:flex; gap:2px; flex:0 0 auto; padding-top:2px;}
+
+/* edit form (inline) */
+.edit-form input{font-family:'Inter',sans-serif; font-size:13px; border:1.5px solid var(--border); border-radius:7px; padding:6px 8px; outline:none; background:var(--surface); margin-bottom:5px; width:100%;}
+.edit-form input:focus{border-color:var(--accent);}
+.edit-form-row{display:flex; gap:6px;}
+.edit-form-row .inp-reihe{width:70px; flex:0 0 auto;}
+.photo-row{display:flex; align-items:center; gap:8px; margin-bottom:5px;}
+.photo-btn{border:1.5px dashed var(--border); background:var(--surface); border-radius:8px; padding:6px 10px; font-size:12px; color:var(--ink-soft); cursor:pointer;}
+.photo-btn:hover{border-color:var(--accent); color:var(--accent);}
+.photo-remove{font-size:11px; color:var(--danger); background:none; border:none; cursor:pointer;}
+.edit-actions{display:flex; gap:6px; margin-top:4px;}
+.edit-actions button{border:none; border-radius:7px; font-size:12.5px; font-weight:600; padding:6px 12px; cursor:pointer;}
+.btn-save{background:var(--sage); color:#fff;}
+.btn-cancel{background:var(--surface-alt); color:var(--ink-soft);}
+
+.add-item-row{margin-top:6px; background:var(--surface-alt); border-radius:10px; padding:8px;}
+.add-shelf-trigger{width:100%; text-align:left; background:transparent; border:none; font-family:'Oswald',sans-serif; font-size:13.5px; font-weight:600; color:var(--ink-soft); cursor:pointer; padding:6px 4px;}
+.add-shelf-trigger:hover{color:var(--accent);}
+.add-shelf-trigger.top-level{font-size:14.5px; margin-top:4px;}
+
+.add-shelf-card{border:1.5px dashed var(--border); border-radius:12px; padding:12px 14px; margin-top:6px; margin-bottom:20px;}
+.add-shelf-form{display:flex; flex-direction:column; gap:8px;}
+.add-shelf-form label{font-size:11.5px; color:var(--ink-soft); font-family:'JetBrains Mono',monospace;}
+.add-shelf-form input{font-family:'Oswald',sans-serif; font-size:14.5px; border:1.5px solid var(--border); border-radius:8px; padding:8px 10px; outline:none; background:var(--surface);}
+.add-shelf-form input:focus{border-color:var(--accent);}
+.add-shelf-form button{border:none; border-radius:8px; background:var(--accent); color:#fff; font-weight:600; font-size:13.5px; padding:9px 16px; cursor:pointer; align-self:flex-start;}
+
+.search-results{padding:4px 4px 0;}
+.search-hit{background:var(--surface); border:1px solid var(--border); border-radius:10px; padding:10px 12px; margin-bottom:8px; display:flex; align-items:center; gap:10px;}
+.hit-loc-badge{font-family:'JetBrains Mono',monospace; font-size:10px; background:var(--sage-soft); color:var(--sage); padding:2px 8px; border-radius:20px; flex:0 0 auto;}
+.no-results{text-align:center; padding:30px 10px; color:var(--ink-soft); font-size:14px;}
+
+.toast{position:fixed; bottom:20px; left:50%; transform:translateX(-50%); background:var(--ink); color:#fff; padding:9px 18px; border-radius:20px; font-size:13px; opacity:0; pointer-events:none; transition:opacity 0.25s ease; z-index:100;}
+.toast.show{opacity:1;}
+
+.status-line{text-align:center; font-size:11px; color:var(--ink-soft); font-family:'JetBrains Mono',monospace; padding:14px 0 6px;}
+
+.photo-overlay{position:fixed; inset:0; background:rgba(20,16,12,0.9); display:flex; align-items:center; justify-content:center; z-index:200; padding:20px;}
+.photo-overlay img{max-width:100%; max-height:100%; border-radius:10px;}
+
+/* ---- Lock screen ---- */
+#lockScreen{position:fixed; inset:0; background:var(--bg); z-index:300; display:flex; align-items:center; justify-content:center; padding:24px;}
+.lock-card{max-width:340px; width:100%; background:var(--surface); border:1.5px solid var(--border); border-radius:14px; padding:26px 22px; text-align:center;}
+.lock-icon{font-size:34px; margin-bottom:8px;}
+.lock-title{font-family:'Oswald',sans-serif; font-weight:700; font-size:20px; text-transform:uppercase; letter-spacing:0.5px; margin-bottom:6px;}
+.lock-sub{font-size:13px; color:var(--ink-soft); margin-bottom:16px; line-height:1.4;}
+.lock-input{width:100%; font-family:'JetBrains Mono',monospace; font-size:22px; letter-spacing:6px; text-align:center; border:1.5px solid var(--border); border-radius:10px; padding:12px; outline:none; background:var(--surface-alt); margin-bottom:10px;}
+.lock-input:focus{border-color:var(--accent);}
+.lock-btn{width:100%; border:none; border-radius:10px; background:var(--accent); color:#fff; font-weight:600; font-size:14.5px; padding:11px; cursor:pointer; margin-bottom:6px;}
+.lock-error{color:var(--danger); font-size:12.5px; min-height:16px; margin-bottom:4px;}
+.lock-hint{font-size:11.5px; color:var(--ink-soft); margin-top:6px;}
+.settings-trigger{position:fixed; top:14px; right:16px; z-index:21; background:var(--surface-alt); border:1px solid var(--border); border-radius:20px; padding:5px 11px; font-size:12px; color:var(--ink-soft); cursor:pointer;}
+
+.scan-btn{width:100%; border:none; border-radius:10px; background:var(--accent); color:#fff; font-weight:600; font-size:13.5px; padding:10px; cursor:pointer; margin-top:8px;}
+
+#scanOverlay{position:fixed; inset:0; background:rgba(20,16,12,0.94); z-index:250; display:flex; align-items:center; justify-content:center; padding:20px;}
+.scan-card{max-width:380px; width:100%; background:var(--surface); border-radius:14px; padding:18px; text-align:center; position:relative;}
+.scan-close{position:absolute; top:8px; right:10px; background:none; border:none; font-size:18px; color:var(--ink-soft); cursor:pointer;}
+.scan-video-wrap{width:100%; aspect-ratio:4/3; background:#000; border-radius:10px; overflow:hidden; margin-bottom:10px; position:relative;}
+.scan-video-wrap video{width:100%; height:100%; object-fit:cover;}
+.scan-status{font-size:12.5px; color:var(--ink-soft); margin-bottom:8px;}
+.scan-form label{display:block; font-size:11.5px; color:var(--ink-soft); font-family:'JetBrains Mono',monospace; margin:8px 0 3px; text-align:left;}
+.scan-form input, .scan-form select{width:100%; font-family:'Inter',sans-serif; font-size:14px; border:1.5px solid var(--border); border-radius:8px; padding:8px 10px; outline:none; background:var(--surface-alt);}
+.scan-form input:focus, .scan-form select:focus{border-color:var(--accent);}
+.scan-save-btn{width:100%; border:none; border-radius:10px; background:var(--sage); color:#fff; font-weight:600; font-size:14px; padding:10px; cursor:pointer; margin-top:12px;}
+
+.ing-suggestions{background:var(--surface-alt); border:1px solid var(--border); border-radius:8px; margin-top:2px; max-height:160px; overflow-y:auto;}
+.ing-suggestion-item{padding:7px 10px; font-size:13px; cursor:pointer; border-bottom:1px solid var(--border);}
+.ing-suggestion-item:last-child{border-bottom:none;}
+.ing-suggestion-item:hover{background:var(--accent-soft);}
+
+/* ---- Tabs ---- */
+.tab-bar{display:flex; gap:6px; margin-bottom:12px;}
+.tab-btn{flex:1; border:1.5px solid var(--border); background:var(--surface); border-radius:10px; padding:9px 8px; font-family:'Oswald',sans-serif; font-weight:600; font-size:13.5px; color:var(--ink-soft); cursor:pointer; text-align:center;}
+.tab-btn.active{background:var(--ink); color:var(--surface); border-color:var(--ink);}
+
+/* ---- Recipes ---- */
+.recipe{background:var(--surface); border:1.5px solid var(--border); border-radius:12px; margin-bottom:12px; overflow:hidden;}
+.recipe-header{display:flex; align-items:center; gap:10px; padding:13px 14px; cursor:pointer; user-select:none;}
+.recipe-icon{font-size:16px; flex:0 0 auto;}
+.recipe-name{font-family:'Oswald',sans-serif; font-weight:600; font-size:16.5px; flex:1; min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;}
+.recipe-name input{font-family:'Oswald',sans-serif; font-weight:600; font-size:16.5px; border:none; border-bottom:1.5px dashed var(--accent); background:transparent; outline:none; width:100%; color:var(--ink);}
+.recipe-avail-badge{font-family:'JetBrains Mono',monospace; font-size:11px; border-radius:20px; padding:3px 9px; flex:0 0 auto;}
+.recipe-avail-badge.ok{background:var(--sage-soft); color:var(--sage);}
+.recipe-avail-badge.missing{background:var(--danger-soft); color:var(--danger);}
+.recipe-body{display:none; border-top:1px dashed var(--border); padding:8px 12px 14px;}
+.recipe.open .recipe-body{display:block;}
+.recipe.open .recipe-header .chevron{transform:rotate(90deg);}
+
+.section-label{font-family:'JetBrains Mono',monospace; font-size:11px; color:var(--ink-soft); text-transform:uppercase; letter-spacing:0.5px; margin:10px 0 6px;}
+.ingredient-row{display:flex; align-items:center; gap:8px; padding:6px 2px; border-bottom:1px solid var(--surface-alt);}
+.ingredient-row:last-child{border-bottom:none;}
+.ingredient-status{font-size:14px; flex:0 0 auto; width:18px; text-align:center;}
+.ingredient-main{flex:1; min-width:0; font-size:14px;}
+.ingredient-amount{font-family:'JetBrains Mono',monospace; font-size:12px; color:var(--ink-soft);}
+.step-row{display:flex; align-items:flex-start; gap:8px; padding:6px 2px; border-bottom:1px solid var(--surface-alt);}
+.step-row:last-child{border-bottom:none;}
+.step-num{font-family:'JetBrains Mono',monospace; font-weight:700; font-size:12px; color:var(--accent); flex:0 0 auto; width:18px; padding-top:1px;}
+.step-text{flex:1; font-size:13.5px; line-height:1.4;}
+.cook-btn{width:100%; border:none; border-radius:10px; padding:12px; font-family:'Oswald',sans-serif; font-weight:600; font-size:14.5px; cursor:pointer; margin-top:12px;}
+.cook-btn.ready{background:var(--sage); color:#fff;}
+.cook-btn.blocked{background:var(--surface-alt); color:var(--ink-soft); cursor:not-allowed;}
+.cook-hint{font-size:11.5px; color:var(--ink-soft); text-align:center; margin-top:6px;}
+
+@media (prefers-reduced-motion: reduce){ *{transition:none !important;} }
+</style>
+</head>
+<body>
+
+<div id="lockScreen">
+  <div class="lock-card" id="lockCard">
+    <div class="lock-icon">🔒</div>
+    <div class="lock-title">Lädt …</div>
+  </div>
+</div>
+
+<button class="settings-trigger" id="logoutTrigger" style="display:none;">🚪 Abmelden</button>
+
+<div class="wrap" id="appContent" style="display:none;">
+  <header>
+    <h1>Abstellkammer</h1>
+    <div class="tab-bar">
+      <button class="tab-btn active" id="tabInventar">📦 Inventar</button>
+      <button class="tab-btn" id="tabRezepte">🍳 Rezepte</button>
+    </div>
+    <div id="inventarHeaderExtra">
+      <div class="search-box">
+        <span class="search-icon">⌕</span>
+        <input id="searchInput" type="text" placeholder="Gegenstand suchen …" autocomplete="off">
+      </div>
+      <button class="scan-btn" id="scanBarcodeBtn">📷 Barcode scannen</button>
+      <div class="stats-row" id="statsRow"></div>
+    </div>
+  </header>
+
+  <main id="mainArea">
+    <div class="empty-state"><div class="big">📦</div><div class="msg">Lade Inventar …</div></div>
+  </main>
+</div>
+
+<div class="toast" id="toast"></div>
+
+<div id="scanOverlay" style="display:none;">
+  <div class="scan-card" id="scanCard"></div>
+</div>
+
+<script type="module">
+import { initializeApp } from "https://www.gstatic.com/firebasejs/10.13.2/firebase-app.js";
+import { getFirestore, doc, getDoc, setDoc, collection, getDocs } from "https://www.gstatic.com/firebasejs/10.13.2/firebase-firestore.js";
+import { getAuth, onAuthStateChanged, signInWithEmailAndPassword, signOut, sendPasswordResetEmail } from "https://www.gstatic.com/firebasejs/10.13.2/firebase-auth.js";
+
+const firebaseConfig = {
+  apiKey: "AIzaSyB-uO98tICNd67KtVtxYQi_7npE8f7Zj6Y",
+  authDomain: "abstellkammermanager.firebaseapp.com",
+  projectId: "abstellkammermanager",
+  storageBucket: "abstellkammermanager.firebasestorage.app",
+  messagingSenderId: "1062426914155",
+  appId: "1:1062426914155:web:f225a555cce79711d8f02e"
+};
+const fbApp = initializeApp(firebaseConfig);
+const db = getFirestore(fbApp);
+const auth = getAuth(fbApp);
+
+// Kleine Helfer für den Zugriff auf einzelne Dokumente in der Sammlung "abstellkammer"
+async function fsGetDoc(name){
+  try{
+    const snap = await getDoc(doc(db, 'abstellkammer', name));
+    return snap.exists() ? snap.data() : null;
+  } catch(e){ console.error('Firestore get error', e); return null; }
+}
+async function fsSetDoc(name, value){
+  try{ await setDoc(doc(db, 'abstellkammer', name), value); return true; }
+  catch(e){ console.error('Firestore set error', e); return false; }
+}
+// Fotos leben in einer eigenen Sammlung, damit das Haupt-Inventar-Dokument klein bleibt
+// (Firestore-Dokumente sind auf ca. 1 MB begrenzt).
+async function fsGetAllPhotos(){
+  const map = {};
+  try{
+    const snap = await getDocs(collection(db, 'photos'));
+    snap.forEach(d=>{ map[d.id] = d.data().photo || null; });
+  } catch(e){ console.error('Firestore photos read error', e); }
+  return map;
+}
+async function fsSetPhoto(itemId, photo){
+  try{ await setDoc(doc(db, 'photos', itemId), { photo: photo || null }); }
+  catch(e){ console.error('Firestore photo write error', e); }
+}
+
+let data = { shelves: [] };
+let storageOk = true;
+let saveTimer = null;
+
+let confirmDeleteId = null;     // "shelf:<id>" | "board:<shelfId>:<boardId>" | "item:<shelfId>:<boardId>:<itemId>"
+let editingShelfId = null;
+let editingItem = null;         // {shelfId, boardId, itemId}
+let addingItemFor = null;       // {shelfId, boardId}
+let addingShelf = false;
+
+let pendingPhoto = null;        // dataURL currently staged for the open add/edit form
+
+let activeTab = 'inventar';     // 'inventar' | 'rezepte'
+let recipesData = { recipes: [] };
+let saveTimerRecipes = null;
+let editingRecipeId = null;
+let addingRecipe = false;
+let addingIngredientFor = null; // recipeId
+let editingIngredient = null;   // {recipeId, ingId}
+let addingStepFor = null;       // recipeId
+let editingStep = null;         // {recipeId, stepId}
+
+let scanStream = null;
+let scanDetectorInterval = null;
+let pendingBarcodePhoto = null;
+let scanMode = 'add';           // 'add' | 'remove'
+let lastScan = {code:null, time:0};
+
+function uid(){ return Date.now().toString(36) + Math.random().toString(36).slice(2,7); }
+function boardLetter(idx){ return String.fromCharCode(65 + idx); }
+function escapeHtml(s){ return (s||'').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])); }
+
+async function loadData(){
+  const res = await fsGetDoc('inventory');
+  if(res && Array.isArray(res.shelves)){
+    data = res;
+    data.shelves.forEach(sh=>{ if(!Array.isArray(sh.boards)) sh.boards = []; });
+  } else {
+    data = { shelves: [] };
+  }
+  const photoMap = await fsGetAllPhotos();
+  data.shelves.forEach(shelf=>shelf.boards.forEach(board=>board.items.forEach(item=>{
+    item.photo = photoMap[item.id] || null;
+  })));
+  await loadRecipes();
+  render();
+}
+
+async function saveData(showToast){
+  try{
+    // Fotos separat speichern, damit das Inventar-Dokument klein bleibt
+    const photoWrites = [];
+    const lightweightShelves = data.shelves.map(shelf => ({
+      ...shelf,
+      boards: shelf.boards.map(board => ({
+        ...board,
+        items: board.items.map(item => {
+          const { photo, ...rest } = item;
+          photoWrites.push(fsSetPhoto(item.id, photo || null));
+          return rest;
+        })
+      }))
+    }));
+    const ok = await fsSetDoc('inventory', { shelves: lightweightShelves });
+    await Promise.all(photoWrites);
+    storageOk = ok;
+    if(showToast) showToastMsg('Gespeichert');
+  } catch(e){
+    storageOk = false;
+    showToastMsg('Speichern fehlgeschlagen');
+  }
+  renderStatus();
+}
+function queueSave(){ clearTimeout(saveTimer); saveTimer = setTimeout(()=>saveData(false), 400); }
+
+async function loadRecipes(){
+  const res = await fsGetDoc('recipes');
+  if(res && Array.isArray(res.recipes)){
+    recipesData = res;
+  } else {
+    recipesData = { recipes: [] };
+  }
+}
+
+async function saveRecipesData(showToast){
+  const ok = await fsSetDoc('recipes', recipesData);
+  storageOk = ok;
+  if(showToast) showToastMsg('Gespeichert');
+  renderStatus();
+}
+function queueSaveRecipes(){ clearTimeout(saveTimerRecipes); saveTimerRecipes = setTimeout(()=>saveRecipesData(false), 400); }
+function showToastMsg(msg){ const t = document.getElementById('toast'); t.textContent = msg; t.classList.add('show'); setTimeout(()=>t.classList.remove('show'), 1600); }
+
+// ---------- Login (Firebase Authentication) ----------
+
+let currentUser = null;
+
+function initLock(){
+  onAuthStateChanged(auth, (user)=>{
+    if(user){
+      currentUser = user.email;
+      enterApp();
+    } else {
+      currentUser = null;
+      document.getElementById('lockScreen').style.display = 'flex';
+      document.getElementById('appContent').style.display = 'none';
+      document.getElementById('logoutTrigger').style.display = 'none';
+      renderLoginForm();
+    }
+  });
+}
+
+function renderLoginForm(){
+  document.getElementById('lockCard').innerHTML = `
+    <div class="lock-icon">📦</div>
+    <div class="lock-title">Abstellkammer</div>
+    <div class="lock-sub">Melde dich mit deinem Familien-Zugang an.</div>
+    <input type="email" class="lock-input" id="loginEmail" placeholder="E-Mail" autocomplete="username" style="letter-spacing:normal; font-family:'Inter',sans-serif; font-size:15px;">
+    <input type="password" class="lock-input" id="loginPassword" placeholder="Passwort" autocomplete="current-password" style="letter-spacing:normal; font-family:'Inter',sans-serif; font-size:15px;">
+    <div class="lock-error" id="lockError"></div>
+    <button class="lock-btn" id="loginBtn">Anmelden</button>
+    <div class="lock-hint" id="forgotPwLink" style="cursor:pointer;">Passwort vergessen?</div>
+    <div class="lock-hint">Noch keinen Zugang? Wende dich an die Person, die die App eingerichtet hat.</div>
+  `;
+  const doLogin = async ()=>{
+    const email = document.getElementById('loginEmail').value.trim();
+    const password = document.getElementById('loginPassword').value;
+    const err = document.getElementById('lockError');
+    err.textContent = '';
+    if(!email || !password){ err.textContent = 'Bitte E-Mail und Passwort eingeben.'; return; }
+    try{
+      await signInWithEmailAndPassword(auth, email, password);
+      // onAuthStateChanged übernimmt den Rest (enterApp)
+    } catch(e){
+      if(e.code === 'auth/invalid-credential' || e.code === 'auth/wrong-password' || e.code === 'auth/user-not-found'){
+        err.textContent = 'E-Mail oder Passwort falsch.';
+      } else if(e.code === 'auth/too-many-requests'){
+        err.textContent = 'Zu viele Versuche – bitte kurz warten.';
+      } else {
+        err.textContent = 'Anmeldung fehlgeschlagen.';
+      }
+    }
+  };
+  document.getElementById('loginBtn').addEventListener('click', doLogin);
+  document.getElementById('loginPassword').addEventListener('keydown', e=>{ if(e.key==='Enter') doLogin(); });
+  document.getElementById('forgotPwLink').addEventListener('click', async ()=>{
+    const email = document.getElementById('loginEmail').value.trim();
+    const err = document.getElementById('lockError');
+    if(!email){ err.textContent = 'Bitte zuerst deine E-Mail eingeben.'; return; }
+    try{
+      await sendPasswordResetEmail(auth, email);
+      err.style.color = 'var(--sage)';
+      err.textContent = 'E-Mail zum Zurücksetzen wurde verschickt.';
+    } catch(e){
+      err.style.color = 'var(--danger)';
+      err.textContent = 'Konnte keine E-Mail verschicken.';
+    }
+  });
+}
+
+function renderGreeting(){
+  let el = document.getElementById('greetingLine');
+  if(!el){
+    el = document.createElement('div');
+    el.id = 'greetingLine';
+    el.style.cssText = 'font-family:"JetBrains Mono",monospace; font-size:11px; color:var(--ink-soft); margin:-4px 0 10px;';
+    const header = document.querySelector('header');
+    header.insertBefore(el, header.querySelector('#inventarHeaderExtra'));
+  }
+  const shortName = escapeHtml((currentUser||'').split('@')[0]);
+  el.innerHTML = `Hallo, ${shortName}`;
+}
+
+function enterApp(){
+  document.getElementById('lockScreen').style.display = 'none';
+  document.getElementById('appContent').style.display = 'block';
+  const trigger = document.getElementById('logoutTrigger');
+  trigger.style.display = 'block';
+  renderGreeting();
+  loadData();
+}
+
+function findBoard(shelfId, boardId){ const shelf = data.shelves.find(s=>s.id===shelfId); return shelf ? shelf.boards.find(b=>b.id===boardId) : null; }
+function findItem(shelfId, boardId, itemId){ const board = findBoard(shelfId, boardId); return board ? board.items.find(i=>i.id===itemId) : null; }
+
+function resizeImageFile(file, maxDim, quality){
+  return new Promise((resolve, reject)=>{
+    const reader = new FileReader();
+    reader.onload = (e)=>{
+      const img = new Image();
+      img.onload = ()=>{
+        let w = img.width, h = img.height;
+        if(w > h){ if(w > maxDim){ h = Math.round(h * (maxDim / w)); w = maxDim; } }
+        else { if(h > maxDim){ w = Math.round(w * (maxDim / h)); h = maxDim; } }
+        const canvas = document.createElement('canvas');
+        canvas.width = w; canvas.height = h;
+        canvas.getContext('2d').drawImage(img, 0, 0, w, h);
+        resolve(canvas.toDataURL('image/jpeg', quality));
+      };
+      img.onerror = reject;
+      img.src = e.target.result;
+    };
+    reader.onerror = reject;
+    reader.readAsDataURL(file);
+  });
+}
+
+function showPhotoOverlay(src){
+  const ov = document.createElement('div');
+  ov.className = 'photo-overlay';
+  ov.innerHTML = `<img src="${src}">`;
+  ov.addEventListener('click', ()=>ov.remove());
+  document.body.appendChild(ov);
+}
+
+// ---------- Rendering ----------
+
+function render(){
+  const main = document.getElementById('mainArea');
+  const extra = document.getElementById('inventarHeaderExtra');
+
+  if(activeTab === 'rezepte'){
+    extra.style.display = 'none';
+    main.innerHTML = renderRecipesTab();
+    attachRecipeHandlers();
+    renderStatus();
+    return;
+  }
+  extra.style.display = 'block';
+
+  renderStats();
+  const term = document.getElementById('searchInput').value.trim().toLowerCase();
+
+  if(term.length > 0){
+    main.innerHTML = renderSearchResults(term);
+    renderStatus();
+    return;
+  }
+
+  if(data.shelves.length === 0){
+    main.innerHTML = `
+      <div class="empty-state"><div class="big">📦</div><div class="msg">Noch keine Regale angelegt.<br>Leg dein erstes Regal an.</div></div>
+      ${renderAddShelf()}`;
+    attachAddShelfHandlers();
+    renderStatus();
+    return;
+  }
+
+  main.innerHTML = data.shelves.map(shelf => renderShelf(shelf)).join('') + renderAddShelf();
+  attachAllHandlers();
+  attachAddShelfHandlers();
+  renderStatus();
+}
+
+function renderStats(){
+  const shelfCount = data.shelves.length;
+  const boardCount = data.shelves.reduce((s,sh)=>s+sh.boards.length,0);
+  const itemCount = data.shelves.reduce((s,sh)=>s+sh.boards.reduce((a,b)=>a+b.items.length,0),0);
+  document.getElementById('statsRow').innerHTML = `
+    <span class="stat-pill">${shelfCount} Regale</span>
+    <span class="stat-pill">${boardCount} Bretter</span>
+    <span class="stat-pill">${itemCount} Positionen</span>`;
+}
+
+function renderStatus(){
+  let el = document.getElementById('statusLine');
+  const wrap = document.querySelector('.wrap');
+  if(!storageOk){
+    if(!el){ el = document.createElement('div'); el.id = 'statusLine'; el.className = 'status-line'; wrap.appendChild(el); }
+    el.textContent = '⚠ Nicht gespeichert – bitte erneut versuchen';
+  } else if(el){ el.remove(); }
+}
+
+function renderShelf(shelf){
+  const isOpen = !!shelf._open;
+  const isEditingName = editingShelfId === shelf.id;
+  const isConfirming = confirmDeleteId === ('shelf:' + shelf.id);
+  const totalItems = shelf.boards.reduce((a,b)=>a+b.items.length,0);
+  const nameHtml = isEditingName
+    ? `<input type="text" class="shelf-name-input" data-shelf="${shelf.id}" value="${escapeHtml(shelf.name)}">`
+    : `<span>${escapeHtml(shelf.name)}</span>`;
+
+  const realBoards = shelf.boards.filter(b=>!b.floor);
+  const floorBoards = shelf.boards.filter(b=>b.floor);
+  // Letter reflects creation order among real boards (A = first/bottom-most). Display top-to-bottom
+  // so the highest board (physically at the top) appears first on screen, A last, Boden at the very end.
+  const lettered = realBoards.map((board, i) => ({ board, letter: boardLetter(i) }));
+  const displayBoards = [...lettered].reverse();
+  const hasFloor = floorBoards.length > 0;
+
+  const boardsHtml = displayBoards.map(({board, letter}) => renderBoard(shelf, board, letter, false)).join('')
+    + floorBoards.map(board => renderBoard(shelf, board, 'Boden', true)).join('');
+
+  return `
+  <div class="shelf ${isOpen?'open':''}" data-shelf="${shelf.id}">
+    <div class="shelf-header" data-toggle-shelf="${shelf.id}">
+      <span class="shelf-tag-hole"></span>
+      <div class="shelf-name">${nameHtml}</div>
+      <span class="shelf-count">${totalItems}</span>
+      <div class="shelf-actions">
+        ${isEditingName
+          ? `<button class="icon-btn" data-save-shelf-name="${shelf.id}">✓</button>`
+          : `<button class="icon-btn" data-edit-shelf="${shelf.id}">✎</button>`}
+        <button class="icon-btn danger" data-del-shelf="${shelf.id}">🗑</button>
+      </div>
+      <span class="chevron">▸</span>
+    </div>
+    <div class="shelf-body">
+      ${isConfirming ? `
+        <div class="confirm-row">
+          Regal "${escapeHtml(shelf.name)}" mit allen Brettern und Inhalten löschen?
+          <button class="confirm-yes" data-confirm-del-shelf="${shelf.id}">Löschen</button>
+          <button class="confirm-no" data-cancel-del>Abbrechen</button>
+        </div>` : ''}
+      ${shelf.boards.length > 0 ? `<div class="shelf-hint">Oben im Regal zuerst · Brett A = unterstes Brett${hasFloor?' · Boden ganz unten':''}</div>` : ''}
+      ${boardsHtml}
+      ${shelf.boards.length === 0 ? `<div style="padding:6px 4px; color:var(--ink-soft); font-size:13px;">Noch keine Bretter in diesem Regal.</div>` : ''}
+      <button class="add-shelf-trigger" data-add-board="${shelf.id}">+ Brett hinzufügen (oben drauf)</button>
+    </div>
+  </div>`;
+}
+
+function renderBoard(shelf, board, letter, isFloor){
+  const isOpen = !!board._open;
+  const isConfirming = confirmDeleteId === ('board:' + shelf.id + ':' + board.id);
+  const isAdding = addingItemFor && addingItemFor.shelfId === shelf.id && addingItemFor.boardId === board.id;
+  const label = isFloor ? 'Boden' : ('Brett ' + letter);
+  const badge = isFloor ? '⬛' : letter;
+  const deleteMsg = isFloor ? 'Boden mit allen Gegenständen löschen?' : ('Brett ' + letter + ' mit allen Gegenständen löschen?');
+
+  const sortedItems = [...board.items].sort((a,b)=>{
+    const ra = a.reihe === '' || a.reihe == null ? 9999 : Number(a.reihe);
+    const rb = b.reihe === '' || b.reihe == null ? 9999 : Number(b.reihe);
+    if(ra !== rb) return ra - rb;
+    return a.name.localeCompare(b.name);
+  });
+
+  return `
+  <div class="board ${isOpen?'open':''}" data-board="${board.id}">
+    <div class="board-header" data-toggle-board="${shelf.id}:${board.id}">
+      <span class="board-badge">${badge}</span>
+      <span class="board-label">${label}</span>
+      <span class="board-count">${board.items.length}</span>
+      <button class="icon-btn danger" data-del-board="${shelf.id}:${board.id}">🗑</button>
+      <span class="chevron">▸</span>
+    </div>
+    <div class="board-body">
+      ${isConfirming ? `
+        <div class="confirm-row">
+          ${deleteMsg}
+          <button class="confirm-yes" data-confirm-del-board="${shelf.id}:${board.id}">Löschen</button>
+          <button class="confirm-no" data-cancel-del>Abbrechen</button>
+        </div>` : ''}
+      ${sortedItems.length === 0 ? `<div style="padding:4px 4px 6px; color:var(--ink-soft); font-size:12.5px;">Noch keine Gegenstände hier.</div>` : ''}
+      ${sortedItems.map(item => renderItem(shelf, board, item)).join('')}
+      ${isAdding ? renderItemForm(shelf, board, null) : `<button class="add-shelf-trigger" data-add-item-trigger="${shelf.id}:${board.id}">+ Gegenstand hinzufügen</button>`}
+    </div>
+  </div>`;
+}
+
+function renderItem(shelf, board, item){
+  const isEditing = editingItem && editingItem.shelfId===shelf.id && editingItem.boardId===board.id && editingItem.itemId===item.id;
+  if(isEditing) return renderItemForm(shelf, board, item);
+
+  const isConfirming = confirmDeleteId === ('item:' + shelf.id + ':' + board.id + ':' + item.id);
+  const low = Number(item.qty) <= 1;
+  const thumb = item.photo
+    ? `<img class="item-thumb" src="${item.photo}" data-view-photo="${item.id}">`
+    : `<div class="item-thumb-placeholder">📦</div>`;
+
+  return `
+  <div class="item-row ${low?'qty-low':''}">
+    ${thumb}
+    <div class="item-main">
+      <div class="item-top-line">
+        <span class="item-name">${escapeHtml(item.name)}</span>
+        ${item.reihe !== '' && item.reihe != null ? `<span class="reihe-badge">Reihe ${escapeHtml(String(item.reihe))}</span>` : ''}
+      </div>
+      ${item.note ? `<div class="item-note">${escapeHtml(item.note)}</div>` : ''}
+      ${isConfirming ? `
+        <div class="confirm-row">
+          Löschen?
+          <button class="confirm-yes" data-confirm-del-item="${shelf.id}:${board.id}:${item.id}">Ja</button>
+          <button class="confirm-no" data-cancel-del>Nein</button>
+        </div>` : ''}
+    </div>
+    <div class="qty-stepper">
+      <button data-qty-dec="${shelf.id}:${board.id}:${item.id}">−</button>
+      <span class="qty-val">${item.qty}</span>
+      <button data-qty-inc="${shelf.id}:${board.id}:${item.id}">+</button>
+    </div>
+    <div class="item-actions">
+      <button class="icon-btn" data-edit-item="${shelf.id}:${board.id}:${item.id}">✎</button>
+      <button class="icon-btn danger" data-del-item="${shelf.id}:${board.id}:${item.id}">🗑</button>
+    </div>
+  </div>`;
+}
+
+function renderItemForm(shelf, board, item){
+  const isEdit = !!item;
+  const photoSrc = pendingPhoto !== null ? pendingPhoto : (isEdit ? item.photo : null);
+  return `
+  <div class="add-item-row edit-form" data-item-form="${shelf.id}:${board.id}:${isEdit?item.id:''}">
+    <input type="text" id="formName" placeholder="Bezeichnung" value="${isEdit?escapeHtml(item.name):''}">
+    <div class="edit-form-row">
+      <input type="number" class="inp-reihe" id="formReihe" placeholder="Reihe" value="${isEdit && item.reihe!=null ? escapeHtml(String(item.reihe)) : ''}">
+      <input type="number" id="formQty" placeholder="Anzahl" value="${isEdit ? item.qty : 1}" min="0" style="flex:1;">
+    </div>
+    <input type="text" id="formNote" placeholder="Notiz (optional)" value="${isEdit?escapeHtml(item.note||''):''}">
+    <div class="photo-row">
+      <input type="file" accept="image/*" capture="environment" id="formPhotoInput" style="display:none;">
+      <button type="button" class="photo-btn" id="formPhotoTrigger">📷 ${photoSrc ? 'Foto ersetzen' : 'Foto aufnehmen'}</button>
+      ${photoSrc ? `<img src="${photoSrc}" style="width:34px;height:34px;border-radius:7px;object-fit:cover;border:1px solid var(--border);">` : ''}
+      ${photoSrc ? `<button type="button" class="photo-remove" id="formPhotoRemove">entfernen</button>` : ''}
+    </div>
+    <div class="edit-actions">
+      <button class="btn-save" id="formSave">${isEdit?'Speichern':'Hinzufügen'}</button>
+      <button class="btn-cancel" id="formCancel">Abbrechen</button>
+    </div>
+  </div>`;
+}
+
+function renderAddShelf(){
+  if(!addingShelf) return `<button class="add-shelf-trigger top-level" id="addShelfTrigger">+ Neues Regal anlegen</button>`;
+  return `
+    <div class="add-shelf-card">
+      <div class="add-shelf-form">
+        <label>Name des Regals</label>
+        <input type="text" id="newShelfName" placeholder="z.B. Regal 1">
+        <label>Anzahl Bretter (optional, kann später ergänzt werden)</label>
+        <input type="number" id="newShelfBoards" placeholder="z.B. 3" min="0">
+        <label style="display:flex; align-items:center; gap:6px; font-family:'Inter',sans-serif; font-size:13px; color:var(--ink);">
+          <input type="checkbox" id="newShelfFloor" style="width:auto;"> Boden hinzufügen (für Dinge, die unters Regal gestellt werden)
+        </label>
+        <button id="confirmAddShelf">Anlegen</button>
+      </div>
+    </div>`;
+}
+
+function renderSearchResults(term){
+  const hits = [];
+  data.shelves.forEach(shelf=>{
+    let realIdx = 0;
+    shelf.boards.forEach(board=>{
+      const letter = board.floor ? 'Boden' : boardLetter(realIdx);
+      if(!board.floor) realIdx++;
+      board.items.forEach(item=>{
+        if(item.name.toLowerCase().includes(term) || (item.note||'').toLowerCase().includes(term)){
+          hits.push({shelf, board, letter, item});
+        }
+      });
+    });
+  });
+  if(hits.length === 0) return `<div class="no-results">Nichts gefunden für „${escapeHtml(term)}"</div>`;
+  return `<div class="search-results">${hits.map(h=>`
+    <div class="search-hit">
+      ${h.item.photo ? `<img class="item-thumb" src="${h.item.photo}" data-view-photo-search="${h.item.id}">` : `<div class="item-thumb-placeholder">📦</div>`}
+      <div class="item-main">
+        <div class="item-name">${escapeHtml(h.item.name)}</div>
+        ${h.item.note ? `<div class="item-note">${escapeHtml(h.item.note)}</div>` : ''}
+      </div>
+      <span class="hit-loc-badge">${escapeHtml(h.shelf.name)} · ${h.letter}${h.item.reihe!=null && h.item.reihe!=='' ? ('/'+escapeHtml(String(h.item.reihe))) : ''}</span>
+      <span class="qty-val">${h.item.qty}×</span>
+    </div>`).join('')}
+  </div>`;
+}
+
+// ---------- Recipes: matching against inventory ----------
+
+function collectMatches(ingredientName){
+  const norm = (ingredientName||'').trim().toLowerCase();
+  const matches = [];
+  data.shelves.forEach(shelf=>shelf.boards.forEach(board=>board.items.forEach(item=>{
+    if(item.name.trim().toLowerCase() === norm) matches.push(item);
+  })));
+  return matches;
+}
+
+function getAllProductNames(){
+  const names = new Set();
+  data.shelves.forEach(shelf=>shelf.boards.forEach(board=>board.items.forEach(item=>{
+    if(item.name) names.add(item.name);
+  })));
+  return Array.from(names).sort((a,b)=>a.localeCompare(b, 'de'));
+}
+
+function totalAvailable(ingredientName){
+  return collectMatches(ingredientName).reduce((sum,it)=>sum+(Number(it.qty)||0),0);
+}
+
+function checkRecipe(recipe){
+  const rows = recipe.ingredients.map(ing=>{
+    const available = totalAvailable(ing.name);
+    const needed = Number(ing.amount)||0;
+    return { ing, available, needed, ok: available >= needed };
+  });
+  return { rows, allOk: rows.length > 0 && rows.every(r=>r.ok) };
+}
+
+function cookRecipe(recipeId){
+  const recipe = recipesData.recipes.find(r=>r.id===recipeId);
+  const { allOk } = checkRecipe(recipe);
+  if(!allOk){ showToastMsg('Es fehlen noch Zutaten'); return; }
+  recipe.ingredients.forEach(ing=>{
+    let needed = Number(ing.amount)||0;
+    const matches = collectMatches(ing.name);
+    for(const item of matches){
+      if(needed <= 0) break;
+      const deduct = Math.min(Number(item.qty)||0, needed);
+      item.qty = (Number(item.qty)||0) - deduct;
+      needed -= deduct;
+    }
+  });
+  queueSave();
+  showToastMsg('Guten Appetit! Zutaten abgezogen 🍽️');
+  render();
+}
+
+// ---------- Recipes: rendering ----------
+
+function renderRecipesTab(){
+  if(recipesData.recipes.length === 0){
+    return `
+      <div class="empty-state"><div class="big">🍳</div><div class="msg">Noch keine Rezepte angelegt.<br>Leg dein erstes Rezept an.</div></div>
+      ${renderAddRecipe()}`;
+  }
+  return recipesData.recipes.map(r => renderRecipeCard(r)).join('') + renderAddRecipe();
+}
+
+function renderRecipeCard(recipe){
+  const isOpen = !!recipe._open;
+  const isEditingName = editingRecipeId === recipe.id;
+  const isConfirming = confirmDeleteId === ('recipe:' + recipe.id);
+  const { rows, allOk } = checkRecipe(recipe);
+  const okCount = rows.filter(r=>r.ok).length;
+
+  const nameHtml = isEditingName
+    ? `<input type="text" class="recipe-name-input" data-recipe="${recipe.id}" value="${escapeHtml(recipe.name)}">`
+    : `<span>${escapeHtml(recipe.name)}</span>`;
+
+  const ingredientsHtml = recipe.ingredients.map(ing => renderIngredientRow(recipe, ing, rows.find(r=>r.ing.id===ing.id))).join('');
+  const isAddingIng = addingIngredientFor === recipe.id;
+  const stepsHtml = recipe.steps.map((step, idx) => renderStepRow(recipe, step, idx)).join('');
+  const isAddingStep = addingStepFor === recipe.id;
+
+  const cookDisabled = rows.length === 0 || !allOk;
+
+  return `
+  <div class="recipe ${isOpen?'open':''}" data-recipe="${recipe.id}">
+    <div class="recipe-header" data-toggle-recipe="${recipe.id}">
+      <span class="recipe-icon">🍽️</span>
+      <div class="recipe-name">${nameHtml}</div>
+      ${rows.length > 0 ? `<span class="recipe-avail-badge ${allOk?'ok':'missing'}">${okCount}/${rows.length}</span>` : ''}
+      <div class="shelf-actions">
+        ${isEditingName
+          ? `<button class="icon-btn" data-save-recipe-name="${recipe.id}">✓</button>`
+          : `<button class="icon-btn" data-edit-recipe="${recipe.id}">✎</button>`}
+        <button class="icon-btn danger" data-del-recipe="${recipe.id}">🗑</button>
+      </div>
+      <span class="chevron">▸</span>
+    </div>
+    <div class="recipe-body">
+      ${isConfirming ? `
+        <div class="confirm-row">
+          Rezept "${escapeHtml(recipe.name)}" löschen?
+          <button class="confirm-yes" data-confirm-del-recipe="${recipe.id}">Löschen</button>
+          <button class="confirm-no" data-cancel-del>Abbrechen</button>
+        </div>` : ''}
+
+      <div class="section-label">Zutaten</div>
+      ${recipe.ingredients.length===0 ? `<div style="color:var(--ink-soft); font-size:12.5px; padding:2px 2px 6px;">Noch keine Zutaten.</div>` : ingredientsHtml}
+      ${isAddingIng ? renderIngredientForm(recipe, null) : `<button class="add-shelf-trigger" data-add-ing-trigger="${recipe.id}">+ Zutat hinzufügen</button>`}
+
+      <div class="section-label">Anleitung</div>
+      ${recipe.steps.length===0 ? `<div style="color:var(--ink-soft); font-size:12.5px; padding:2px 2px 6px;">Noch keine Schritte.</div>` : stepsHtml}
+      ${isAddingStep ? renderStepForm(recipe, null) : `<button class="add-shelf-trigger" data-add-step-trigger="${recipe.id}">+ Schritt hinzufügen</button>`}
+
+      <button class="cook-btn ${cookDisabled?'blocked':'ready'}" data-cook="${recipe.id}" ${cookDisabled?'disabled':''}>🍳 Kochen</button>
+      ${cookDisabled ? `<div class="cook-hint">${rows.length===0?'Füge zuerst Zutaten hinzu.':'Es fehlen noch Zutaten im Bestand.'}</div>` : `<div class="cook-hint">Zieht die Zutaten direkt aus dem Abstellraum-Bestand ab.</div>`}
+    </div>
+  </div>`;
+}
+
+function renderIngredientRow(recipe, ing, checkRow){
+  const isEditing = editingIngredient && editingIngredient.recipeId===recipe.id && editingIngredient.ingId===ing.id;
+  if(isEditing) return renderIngredientForm(recipe, ing);
+  const isConfirming = confirmDeleteId === ('ingredient:' + recipe.id + ':' + ing.id);
+  const ok = checkRow ? checkRow.ok : false;
+  const available = checkRow ? checkRow.available : 0;
+  return `
+  <div class="ingredient-row">
+    <span class="ingredient-status">${ok ? '✅' : '⚠️'}</span>
+    <div class="ingredient-main">
+      ${escapeHtml(ing.name)} <span class="ingredient-amount">— benötigt ${escapeHtml(String(ing.amount))}, im Bestand ${available}</span>
+      ${isConfirming ? `
+        <div class="confirm-row" style="margin-top:5px;">
+          Löschen?
+          <button class="confirm-yes" data-confirm-del-ing="${recipe.id}:${ing.id}">Ja</button>
+          <button class="confirm-no" data-cancel-del>Nein</button>
+        </div>` : ''}
+    </div>
+    <div class="item-actions">
+      <button class="icon-btn" data-edit-ing="${recipe.id}:${ing.id}">✎</button>
+      <button class="icon-btn danger" data-del-ing="${recipe.id}:${ing.id}">🗑</button>
+    </div>
+  </div>`;
+}
+
+function renderIngredientForm(recipe, ing){
+  const isEdit = !!ing;
+  return `
+  <div class="add-item-row edit-form" data-ing-form="${recipe.id}:${isEdit?ing.id:''}">
+    <div class="edit-form-row">
+      <input type="text" id="ingName" placeholder="Zutat suchen oder eingeben …" value="${isEdit?escapeHtml(ing.name):''}" style="flex:1;" autocomplete="off">
+      <input type="number" id="ingAmount" placeholder="Menge" value="${isEdit?ing.amount:1}" min="0" style="width:70px; flex:0 0 auto;">
+    </div>
+    <div id="ingNameSuggestions" class="ing-suggestions"></div>
+    <div class="edit-actions">
+      <button class="btn-save" id="ingSave">${isEdit?'Speichern':'Hinzufügen'}</button>
+      <button class="btn-cancel" id="ingCancel">Abbrechen</button>
+    </div>
+  </div>`;
+}
+
+function renderStepRow(recipe, step, idx){
+  const isEditing = editingStep && editingStep.recipeId===recipe.id && editingStep.stepId===step.id;
+  if(isEditing) return renderStepForm(recipe, step);
+  const isConfirming = confirmDeleteId === ('step:' + recipe.id + ':' + step.id);
+  return `
+  <div class="step-row">
+    <span class="step-num">${idx+1}.</span>
+    <div class="step-text">
+      ${escapeHtml(step.text)}
+      ${isConfirming ? `
+        <div class="confirm-row" style="margin-top:5px;">
+          Löschen?
+          <button class="confirm-yes" data-confirm-del-step="${recipe.id}:${step.id}">Ja</button>
+          <button class="confirm-no" data-cancel-del>Nein</button>
+        </div>` : ''}
+    </div>
+    <div class="item-actions">
+      <button class="icon-btn" data-edit-step="${recipe.id}:${step.id}">✎</button>
+      <button class="icon-btn danger" data-del-step="${recipe.id}:${step.id}">🗑</button>
+    </div>
+  </div>`;
+}
+
+function renderStepForm(recipe, step){
+  const isEdit = !!step;
+  return `
+  <div class="add-item-row edit-form" data-step-form="${recipe.id}:${isEdit?step.id:''}">
+    <input type="text" id="stepText" placeholder="z.B. Zwiebeln anbraten" value="${isEdit?escapeHtml(step.text):''}">
+    <div class="edit-actions">
+      <button class="btn-save" id="stepSave">${isEdit?'Speichern':'Hinzufügen'}</button>
+      <button class="btn-cancel" id="stepCancel">Abbrechen</button>
+    </div>
+  </div>`;
+}
+
+function renderAddRecipe(){
+  if(!addingRecipe) return `<button class="add-shelf-trigger top-level" id="addRecipeTrigger">+ Neues Rezept anlegen</button>`;
+  return `
+    <div class="add-shelf-card">
+      <div class="add-shelf-form">
+        <label>Name des Rezepts</label>
+        <input type="text" id="newRecipeName" placeholder="z.B. Spaghetti Bolognese">
+        <button id="confirmAddRecipe">Anlegen</button>
+      </div>
+    </div>`;
+}
+
+// ---------- Barcode scanner ----------
+
+function findItemByBarcode(code){
+  for(const shelf of data.shelves){
+    for(const board of shelf.boards){
+      for(const item of board.items){
+        if(item.barcode && item.barcode === code) return {shelf, board, item};
+      }
+    }
+  }
+  return null;
+}
+
+function boardOptionsForShelf(shelf){
+  const realBoards = shelf.boards.filter(b=>!b.floor);
+  const opts = realBoards.map((b,i)=>({id:b.id, label:'Brett ' + boardLetter(i)}));
+  shelf.boards.filter(b=>b.floor).forEach(b=>opts.push({id:b.id, label:'Boden'}));
+  return opts;
+}
+
+function openBarcodeScanner(){
+  pendingBarcodePhoto = null;
+  scanMode = 'add';
+  lastScan = {code:null, time:0};
+  document.getElementById('scanOverlay').style.display = 'flex';
+  renderCameraConsent();
+}
+
+function renderCameraConsent(){
+  const card = document.getElementById('scanCard');
+  card.innerHTML = `
+    <button class="scan-close" id="scanCloseBtn">✕</button>
+    <div class="lock-icon">📷</div>
+    <div class="lock-title" style="margin-bottom:6px;">Kamera-Zugriff</div>
+    <div class="scan-status">Um Barcodes automatisch zu erkennen, muss der Browser auf deine Kamera zugreifen dürfen. Dein Handy fragt dich gleich danach.</div>
+    <button class="scan-save-btn" id="allowCameraBtn" style="margin-top:14px;">📷 Kamera erlauben</button>
+    <button class="add-shelf-trigger" id="skipCameraBtn" style="margin-top:4px;">Ohne Kamera – Nummer eingeben</button>
+  `;
+  document.getElementById('scanCloseBtn').addEventListener('click', closeScanner);
+  document.getElementById('allowCameraBtn').addEventListener('click', startCameraAndDetection);
+  document.getElementById('skipCameraBtn').addEventListener('click', ()=>showManualBarcodeEntry('Barcode-Nummer bitte eingeben:'));
+}
+
+async function startCameraAndDetection(){
+  const card = document.getElementById('scanCard');
+  card.innerHTML = `
+    <button class="scan-close" id="scanCloseBtn">✕</button>
+    <div class="lock-title" style="margin-bottom:8px;">Barcode scannen</div>
+    ${scanModeToggleHtml()}
+    <div class="scan-video-wrap"><video id="scanVideo" autoplay playsinline muted></video></div>
+    <div class="scan-status" id="scanStatus">Kamera wird gestartet …</div>
+  `;
+  document.getElementById('scanCloseBtn').addEventListener('click', closeScanner);
+  attachScanModeToggleHandlers();
+
+  if(!window.isSecureContext){
+    showManualBarcodeEntry('Kamera braucht eine sichere (https) Verbindung. Bitte die Seite über die richtige https-Adresse (z.B. deinen GitHub-Pages-Link) öffnen, nicht als lokale Datei. Bis dahin kannst du die Nummer hier eintippen.');
+    return;
+  }
+  if(!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia){
+    showManualBarcodeEntry('Dieser Browser unterstützt keinen Kamerazugriff – bitte Nummer eingeben.');
+    return;
+  }
+
+  try{
+    scanStream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: 'environment' } });
+  } catch(e){
+    let msg = 'Kamera nicht verfügbar – bitte Nummer eingeben.';
+    if(e && e.name === 'NotAllowedError') msg = 'Kamerazugriff wurde blockiert. Bitte in den Website-Einstellungen des Browsers die Kamera erlauben, oder Nummer eingeben.';
+    else if(e && e.name === 'NotFoundError') msg = 'Es wurde keine Kamera gefunden – bitte Nummer eingeben.';
+    else if(e && e.name === 'NotReadableError') msg = 'Kamera wird gerade von einer anderen App benutzt – bitte Nummer eingeben.';
+    showManualBarcodeEntry(msg);
+    return;
+  }
+  const video = document.getElementById('scanVideo');
+  video.srcObject = scanStream;
+
+  if(!('BarcodeDetector' in window)){
+    showManualBarcodeEntry('Barcode-Erkennung wird von diesem Browser nicht unterstützt – bitte Nummer eingeben.');
+    return;
+  }
+
+  document.getElementById('scanStatus').textContent = 'Halte den Barcode vor die Kamera …';
+  let detector;
+  try{
+    detector = new BarcodeDetector({ formats: ['ean_13','ean_8','upc_a','upc_e','code_128','code_39','qr_code'] });
+  } catch(e){
+    showManualBarcodeEntry('Barcode-Erkennung konnte nicht gestartet werden – bitte Nummer eingeben.');
+    return;
+  }
+
+  scanDetectorInterval = setInterval(async ()=>{
+    try{
+      const results = await detector.detect(video);
+      if(results && results.length > 0){
+        const code = results[0].rawValue;
+        const now = Date.now();
+        if(code === lastScan.code && (now - lastScan.time) < 2200) return;
+        lastScan = {code, time: now};
+        handleBarcodeDetected(code);
+      }
+    } catch(e){ /* ignore transient detection errors */ }
+  }, 400);
+}
+
+function scanModeToggleHtml(){
+  return `
+    <div style="display:flex; gap:6px; margin-bottom:10px;">
+      <button type="button" class="tab-btn ${scanMode==='add'?'active':''}" id="scanModeAdd" style="flex:1;">➕ Hinzufügen</button>
+      <button type="button" class="tab-btn ${scanMode==='remove'?'active':''}" id="scanModeRemove" style="flex:1;">➖ Herausnehmen</button>
+    </div>`;
+}
+
+function attachScanModeToggleHandlers(){
+  const addBtn = document.getElementById('scanModeAdd');
+  const removeBtn = document.getElementById('scanModeRemove');
+  if(addBtn) addBtn.addEventListener('click', ()=>{
+    scanMode = 'add'; addBtn.classList.add('active'); if(removeBtn) removeBtn.classList.remove('active');
+  });
+  if(removeBtn) removeBtn.addEventListener('click', ()=>{
+    scanMode = 'remove'; removeBtn.classList.add('active'); if(addBtn) addBtn.classList.remove('active');
+  });
+}
+
+function showManualBarcodeEntry(msg){
+  const card = document.getElementById('scanCard');
+  card.innerHTML = `
+    <button class="scan-close" id="scanCloseBtn">✕</button>
+    <div class="lock-title" style="margin-bottom:8px;">Barcode eingeben</div>
+    ${scanModeToggleHtml()}
+    <div class="scan-status">${escapeHtml(msg)}</div>
+    <div class="scan-form">
+      <label>Barcode-Nummer</label>
+      <input type="text" id="manualBarcodeInput" placeholder="z.B. 4006381333931" inputmode="numeric">
+    </div>
+    <button class="scan-save-btn" id="manualBarcodeBtn">Weiter</button>
+  `;
+  document.getElementById('scanCloseBtn').addEventListener('click', closeScanner);
+  attachScanModeToggleHandlers();
+  document.getElementById('manualBarcodeBtn').addEventListener('click', ()=>{
+    const val = document.getElementById('manualBarcodeInput').value.trim();
+    if(!val){ showToastMsg('Bitte eine Nummer eingeben'); return; }
+    handleBarcodeDetected(val);
+  });
+  document.getElementById('manualBarcodeInput').addEventListener('keydown', e=>{ if(e.key==='Enter') document.getElementById('manualBarcodeBtn').click(); });
+  document.getElementById('manualBarcodeInput').focus();
+}
+
+function stopScanCamera(){
+  if(scanDetectorInterval){ clearInterval(scanDetectorInterval); scanDetectorInterval = null; }
+  if(scanStream){ scanStream.getTracks().forEach(t=>t.stop()); scanStream = null; }
+}
+
+function closeScanner(){
+  stopScanCamera();
+  document.getElementById('scanOverlay').style.display = 'none';
+  pendingBarcodePhoto = null;
+}
+
+function afterQuickScanFeedback(msg){
+  const status = document.getElementById('scanStatus');
+  if(status) status.textContent = msg;
+  const manualInput = document.getElementById('manualBarcodeInput');
+  if(manualInput){ manualInput.value = ''; manualInput.focus(); }
+  render();
+}
+
+function handleBarcodeDetected(code){
+  const match = findItemByBarcode(code);
+
+  if(scanMode === 'remove'){
+    if(match){
+      match.item.qty = Math.max(0, (Number(match.item.qty)||0) - 1);
+      queueSave();
+      showToastMsg(`${match.item.name}: Menge auf ${match.item.qty} verringert`);
+      afterQuickScanFeedback(`✅ ${match.item.name} entnommen (jetzt ${match.item.qty}) – nächsten Barcode scannen …`);
+    } else {
+      showToastMsg('Barcode nicht im Bestand gefunden');
+      afterQuickScanFeedback('⚠️ Dieser Barcode ist nicht im Bestand – nächsten Barcode scannen …');
+    }
+    return;
+  }
+
+  // add mode
+  if(match){
+    match.item.qty = (Number(match.item.qty)||0) + 1;
+    queueSave();
+    showToastMsg(`${match.item.name}: Menge auf ${match.item.qty} erhöht`);
+    afterQuickScanFeedback(`✅ ${match.item.name} hinzugefügt (jetzt ${match.item.qty}) – nächsten Barcode scannen …`);
+    return;
+  }
+  stopScanCamera();
+  showNewBarcodeItemForm(code);
+}
+
+async function lookupOpenFoodFacts(code){
+  try{
+    const res = await fetch(`https://world.openfoodfacts.org/api/v2/product/${encodeURIComponent(code)}.json`);
+    if(!res.ok) return null;
+    const json = await res.json();
+    if(json && json.status === 1 && json.product){
+      const p = json.product;
+      const name = p.product_name_de || p.product_name || p.generic_name_de || p.generic_name || '';
+      const photo = p.image_front_url || p.image_url || null;
+      return { name, photo };
+    }
+  } catch(e){ /* Datenbank nicht erreichbar oder Produkt unbekannt */ }
+  return null;
+}
+
+async function showNewBarcodeItemForm(code){
+  if(data.shelves.length === 0){
+    const card = document.getElementById('scanCard');
+    card.innerHTML = `
+      <button class="scan-close" id="scanCloseBtn">✕</button>
+      <div class="lock-title" style="margin-bottom:8px;">Neues Produkt</div>
+      <div class="scan-status">Es gibt noch kein Regal. Lege zuerst ein Regal an, bevor du Produkte scannst.</div>
+    `;
+    document.getElementById('scanCloseBtn').addEventListener('click', closeScanner);
+    return;
+  }
+
+  const card = document.getElementById('scanCard');
+  card.innerHTML = `
+    <button class="scan-close" id="scanCloseBtn">✕</button>
+    <div class="lock-title" style="margin-bottom:8px;">Neues Produkt</div>
+    <div class="scan-status">Suche Produkt in der Lebensmittel-Datenbank …</div>
+  `;
+  document.getElementById('scanCloseBtn').addEventListener('click', closeScanner);
+
+  const offResult = await lookupOpenFoodFacts(code);
+  pendingBarcodePhoto = (offResult && offResult.photo) ? offResult.photo : null;
+  const prefillName = (offResult && offResult.name) ? offResult.name : '';
+
+  const renderForm = (shelfId)=>{
+    const shelf = data.shelves.find(s=>s.id===shelfId) || data.shelves[0];
+    const boardOpts = boardOptionsForShelf(shelf);
+    const photoPreviewHtml = pendingBarcodePhoto
+      ? `<img src="${pendingBarcodePhoto}" style="width:34px;height:34px;border-radius:7px;object-fit:cover;border:1px solid var(--border);vertical-align:middle;margin-left:6px;">`
+      : '';
+    card.innerHTML = `
+      <button class="scan-close" id="scanCloseBtn">✕</button>
+      <div class="lock-title" style="margin-bottom:4px;">Neues Produkt</div>
+      <div class="scan-status">Barcode: ${escapeHtml(code)} – noch nicht im Bestand.${offResult ? ' Daten aus der Lebensmittel-Datenbank übernommen (kannst du anpassen).' : ''}</div>
+      <div class="scan-form">
+        <label>Bezeichnung</label>
+        <input type="text" id="scanItemName" placeholder="Produktname" value="${escapeHtml(prefillName)}">
+        <label>Regal</label>
+        <select id="scanShelfSelect">
+          ${data.shelves.map(s=>`<option value="${s.id}" ${s.id===shelf.id?'selected':''}>${escapeHtml(s.name)}</option>`).join('')}
+        </select>
+        <label>Brett / Boden</label>
+        <select id="scanBoardSelect">
+          ${boardOpts.length===0 ? `<option value="">Kein Brett vorhanden</option>` : boardOpts.map(o=>`<option value="${o.id}">${o.label}</option>`).join('')}
+        </select>
+        <label>Reihe (optional)</label>
+        <input type="number" id="scanReihe" placeholder="z.B. 2">
+        <label>Menge</label>
+        <input type="number" id="scanQty" value="1" min="0">
+        <label>Foto</label>
+        <input type="file" accept="image/*" capture="environment" id="scanPhotoInput" style="display:none;">
+        <button type="button" class="photo-btn" id="scanPhotoTrigger" style="margin-top:4px;">📷 ${pendingBarcodePhoto?'Foto ersetzen':'Foto aufnehmen'}</button>
+        <span id="scanPhotoPreviewWrap">${photoPreviewHtml}</span>
+      </div>
+      <button class="scan-save-btn" id="scanSaveBtn">Speichern</button>
+    `;
+    document.getElementById('scanCloseBtn').addEventListener('click', closeScanner);
+    document.getElementById('scanShelfSelect').addEventListener('change', (e)=>renderForm(e.target.value));
+    document.getElementById('scanPhotoTrigger').addEventListener('click', ()=>document.getElementById('scanPhotoInput').click());
+    document.getElementById('scanPhotoInput').addEventListener('change', async ()=>{
+      const file = document.getElementById('scanPhotoInput').files[0];
+      if(!file) return;
+      showToastMsg('Foto wird verarbeitet …');
+      try{
+        pendingBarcodePhoto = await resizeImageFile(file, 640, 0.65);
+        document.getElementById('scanPhotoPreviewWrap').innerHTML = `<img src="${pendingBarcodePhoto}" style="width:34px;height:34px;border-radius:7px;object-fit:cover;border:1px solid var(--border);vertical-align:middle;margin-left:6px;">`;
+      } catch(e){ showToastMsg('Foto konnte nicht geladen werden'); }
+    });
+    document.getElementById('scanSaveBtn').addEventListener('click', ()=>{
+      const name = document.getElementById('scanItemName').value.trim();
+      const boardId = document.getElementById('scanBoardSelect').value;
+      const reiheRaw = document.getElementById('scanReihe').value;
+      const qty = Number(document.getElementById('scanQty').value) || 0;
+      if(!name){ showToastMsg('Bitte eine Bezeichnung eingeben'); return; }
+      if(!boardId){ showToastMsg('Bitte zuerst ein Brett anlegen'); return; }
+      const targetShelf = data.shelves.find(s=>s.id===document.getElementById('scanShelfSelect').value);
+      const board = targetShelf.boards.find(b=>b.id===boardId);
+      board.items.push({
+        id:uid(), name, qty,
+        note:'', reihe: reiheRaw==='' ? null : Number(reiheRaw),
+        photo: pendingBarcodePhoto || null,
+        barcode: code
+      });
+      queueSave();
+      showToastMsg('Produkt hinzugefügt');
+      closeScanner();
+      targetShelf._open = true; board._open = true;
+      if(activeTab !== 'inventar'){ activeTab='inventar'; document.getElementById('tabInventar').classList.add('active'); document.getElementById('tabRezepte').classList.remove('active'); }
+      render();
+    });
+  };
+  renderForm(data.shelves[0].id);
+}
+
+// ---------- Handlers ----------
+
+
+
+function attachAllHandlers(){
+  document.querySelectorAll('[data-toggle-shelf]').forEach(el=>{
+    el.addEventListener('click', (e)=>{
+      if(e.target.closest('.shelf-actions') || e.target.closest('input')) return;
+      const shelf = data.shelves.find(s=>s.id===el.getAttribute('data-toggle-shelf'));
+      shelf._open = !shelf._open;
+      render();
+    });
+  });
+
+  document.querySelectorAll('[data-toggle-board]').forEach(el=>{
+    el.addEventListener('click', (e)=>{
+      if(e.target.closest('.icon-btn')) return;
+      const [sid,bid] = el.getAttribute('data-toggle-board').split(':');
+      const board = findBoard(sid,bid);
+      board._open = !board._open;
+      render();
+    });
+  });
+
+  document.querySelectorAll('[data-edit-shelf]').forEach(el=>el.addEventListener('click', ()=>{
+    editingShelfId = el.getAttribute('data-edit-shelf'); render();
+    const inp = document.querySelector('.shelf-name-input'); if(inp){inp.focus(); inp.select();}
+  }));
+  document.querySelectorAll('[data-save-shelf-name]').forEach(el=>el.addEventListener('click', ()=>{
+    const id = el.getAttribute('data-save-shelf-name');
+    const inp = document.querySelector(`.shelf-name-input[data-shelf="${id}"]`);
+    const shelf = data.shelves.find(s=>s.id===id);
+    if(inp && inp.value.trim()) shelf.name = inp.value.trim();
+    editingShelfId = null; queueSave(); render();
+  }));
+  document.querySelectorAll('.shelf-name-input').forEach(el=>{
+    el.addEventListener('click', e=>e.stopPropagation());
+    el.addEventListener('keydown', e=>{ if(e.key==='Enter') document.querySelector(`[data-save-shelf-name]`).click(); });
+  });
+
+  document.querySelectorAll('[data-del-shelf]').forEach(el=>el.addEventListener('click', ()=>{
+    confirmDeleteId = 'shelf:' + el.getAttribute('data-del-shelf');
+    data.shelves.find(s=>s.id===el.getAttribute('data-del-shelf'))._open = true;
+    render();
+  }));
+  document.querySelectorAll('[data-confirm-del-shelf]').forEach(el=>el.addEventListener('click', ()=>{
+    data.shelves = data.shelves.filter(s=>s.id!==el.getAttribute('data-confirm-del-shelf'));
+    confirmDeleteId = null; queueSave(); showToastMsg('Regal gelöscht'); render();
+  }));
+
+  document.querySelectorAll('[data-add-board]').forEach(el=>el.addEventListener('click', ()=>{
+    const shelf = data.shelves.find(s=>s.id===el.getAttribute('data-add-board'));
+    shelf.boards.push({id:uid(), items:[], _open:true});
+    queueSave(); render();
+  }));
+  document.querySelectorAll('[data-del-board]').forEach(el=>el.addEventListener('click', ()=>{
+    const [sid,bid] = el.getAttribute('data-del-board').split(':');
+    confirmDeleteId = 'board:' + sid + ':' + bid;
+    findBoard(sid,bid)._open = true;
+    render();
+  }));
+  document.querySelectorAll('[data-confirm-del-board]').forEach(el=>el.addEventListener('click', ()=>{
+    const [sid,bid] = el.getAttribute('data-confirm-del-board').split(':');
+    const shelf = data.shelves.find(s=>s.id===sid);
+    shelf.boards = shelf.boards.filter(b=>b.id!==bid);
+    confirmDeleteId = null; queueSave(); showToastMsg('Brett gelöscht'); render();
+  }));
+
+  document.querySelectorAll('[data-cancel-del]').forEach(el=>el.addEventListener('click', ()=>{ confirmDeleteId = null; render(); }));
+
+  document.querySelectorAll('[data-qty-inc]').forEach(el=>el.addEventListener('click', ()=>{
+    const [sid,bid,iid] = el.getAttribute('data-qty-inc').split(':');
+    const item = findItem(sid,bid,iid); item.qty = (Number(item.qty)||0)+1; queueSave(); render();
+  }));
+  document.querySelectorAll('[data-qty-dec]').forEach(el=>el.addEventListener('click', ()=>{
+    const [sid,bid,iid] = el.getAttribute('data-qty-dec').split(':');
+    const item = findItem(sid,bid,iid); item.qty = Math.max(0,(Number(item.qty)||0)-1); queueSave(); render();
+  }));
+
+  document.querySelectorAll('[data-edit-item]').forEach(el=>el.addEventListener('click', ()=>{
+    const [sid,bid,iid] = el.getAttribute('data-edit-item').split(':');
+    editingItem = {shelfId:sid, boardId:bid, itemId:iid};
+    pendingPhoto = null;
+    render();
+    const inp = document.getElementById('formName'); if(inp){inp.focus();}
+  }));
+  document.querySelectorAll('[data-del-item]').forEach(el=>el.addEventListener('click', ()=>{
+    confirmDeleteId = 'item:' + el.getAttribute('data-del-item'); render();
+  }));
+  document.querySelectorAll('[data-confirm-del-item]').forEach(el=>el.addEventListener('click', ()=>{
+    const [sid,bid,iid] = el.getAttribute('data-confirm-del-item').split(':');
+    const board = findBoard(sid,bid);
+    board.items = board.items.filter(i=>i.id!==iid);
+    confirmDeleteId = null; queueSave(); showToastMsg('Gegenstand gelöscht'); render();
+  }));
+
+  document.querySelectorAll('[data-add-item-trigger]').forEach(el=>el.addEventListener('click', ()=>{
+    const [sid,bid] = el.getAttribute('data-add-item-trigger').split(':');
+    addingItemFor = {shelfId:sid, boardId:bid};
+    pendingPhoto = null;
+    render();
+    const inp = document.getElementById('formName'); if(inp) inp.focus();
+  }));
+
+  // photo view overlay
+  document.querySelectorAll('[data-view-photo]').forEach(el=>el.addEventListener('click', ()=>showPhotoOverlay(el.getAttribute('src'))));
+  document.querySelectorAll('[data-view-photo-search]').forEach(el=>el.addEventListener('click', ()=>showPhotoOverlay(el.getAttribute('src'))));
+
+  // item form (shared add/edit)
+  const form = document.querySelector('[data-item-form]');
+  if(form){
+    const [sid, bid, iid] = form.getAttribute('data-item-form').split(':');
+    const photoTrigger = document.getElementById('formPhotoTrigger');
+    const photoInput = document.getElementById('formPhotoInput');
+    const photoRemove = document.getElementById('formPhotoRemove');
+    if(photoTrigger) photoTrigger.addEventListener('click', ()=>photoInput.click());
+    if(photoInput) photoInput.addEventListener('change', async ()=>{
+      const file = photoInput.files[0];
+      if(!file) return;
+      showToastMsg('Foto wird verarbeitet …');
+      try{
+        pendingPhoto = await resizeImageFile(file, 640, 0.65);
+        render();
+      } catch(e){ showToastMsg('Foto konnte nicht geladen werden'); }
+    });
+    if(photoRemove) photoRemove.addEventListener('click', ()=>{ pendingPhoto = ''; render(); });
+
+    document.getElementById('formCancel').addEventListener('click', ()=>{
+      editingItem = null; addingItemFor = null; pendingPhoto = null; render();
+    });
+    document.getElementById('formSave').addEventListener('click', ()=>{
+      const name = document.getElementById('formName').value.trim();
+      const reiheRaw = document.getElementById('formReihe').value;
+      const qty = Number(document.getElementById('formQty').value) || 0;
+      const note = document.getElementById('formNote').value.trim();
+      if(!name){ showToastMsg('Bitte eine Bezeichnung eingeben'); return; }
+      const reihe = reiheRaw === '' ? null : Number(reiheRaw);
+
+      let finalPhoto;
+      if(pendingPhoto === null){
+        finalPhoto = iid ? findItem(sid,bid,iid).photo || null : null;
+      } else if(pendingPhoto === ''){
+        finalPhoto = null;
+      } else {
+        finalPhoto = pendingPhoto;
+      }
+
+      if(iid){
+        const item = findItem(sid,bid,iid);
+        item.name = name; item.qty = qty; item.note = note; item.reihe = reihe; item.photo = finalPhoto;
+      } else {
+        const board = findBoard(sid,bid);
+        board.items.push({id:uid(), name, qty, note, reihe, photo: finalPhoto});
+      }
+      editingItem = null; addingItemFor = null; pendingPhoto = null;
+      queueSave(); render();
+    });
+    ['formName','formReihe','formQty','formNote'].forEach(id=>{
+      const el = document.getElementById(id);
+      if(el) el.addEventListener('keydown', e=>{ if(e.key==='Enter') document.getElementById('formSave').click(); });
+    });
+  }
+}
+
+function attachAddShelfHandlers(){
+  const trigger = document.getElementById('addShelfTrigger');
+  if(trigger) trigger.addEventListener('click', ()=>{ addingShelf = true; render(); const inp=document.getElementById('newShelfName'); if(inp) inp.focus(); });
+
+  const confirmBtn = document.getElementById('confirmAddShelf');
+  if(confirmBtn){
+    confirmBtn.addEventListener('click', ()=>{
+      const name = document.getElementById('newShelfName').value.trim();
+      const boardCount = Number(document.getElementById('newShelfBoards').value) || 0;
+      const wantsFloor = document.getElementById('newShelfFloor').checked;
+      if(!name){ showToastMsg('Bitte einen Namen eingeben'); return; }
+      const boards = [];
+      for(let i=0;i<boardCount;i++) boards.push({id:uid(), items:[], _open:false});
+      if(boards.length) boards[0]._open = true;
+      if(wantsFloor) boards.push({id:uid(), items:[], _open:false, floor:true});
+      data.shelves.push({id:uid(), name, boards, _open:true});
+      addingShelf = false;
+      queueSave(); render();
+    });
+    document.getElementById('newShelfName').addEventListener('keydown', e=>{ if(e.key==='Enter') confirmBtn.click(); });
+    document.getElementById('newShelfBoards').addEventListener('keydown', e=>{ if(e.key==='Enter') confirmBtn.click(); });
+  }
+}
+
+function attachRecipeHandlers(){
+  document.querySelectorAll('[data-toggle-recipe]').forEach(el=>el.addEventListener('click', (e)=>{
+    if(e.target.closest('.shelf-actions') || e.target.closest('input')) return;
+    const r = recipesData.recipes.find(r=>r.id===el.getAttribute('data-toggle-recipe'));
+    r._open = !r._open; render();
+  }));
+
+  document.querySelectorAll('[data-edit-recipe]').forEach(el=>el.addEventListener('click', ()=>{
+    editingRecipeId = el.getAttribute('data-edit-recipe'); render();
+    const inp = document.querySelector('.recipe-name-input'); if(inp){inp.focus(); inp.select();}
+  }));
+  document.querySelectorAll('[data-save-recipe-name]').forEach(el=>el.addEventListener('click', ()=>{
+    const id = el.getAttribute('data-save-recipe-name');
+    const inp = document.querySelector(`.recipe-name-input[data-recipe="${id}"]`);
+    const r = recipesData.recipes.find(r=>r.id===id);
+    if(inp && inp.value.trim()) r.name = inp.value.trim();
+    editingRecipeId = null; queueSaveRecipes(); render();
+  }));
+  document.querySelectorAll('.recipe-name-input').forEach(el=>{
+    el.addEventListener('click', e=>e.stopPropagation());
+    el.addEventListener('keydown', e=>{ if(e.key==='Enter') document.querySelector('[data-save-recipe-name]').click(); });
+  });
+
+  document.querySelectorAll('[data-del-recipe]').forEach(el=>el.addEventListener('click', ()=>{
+    confirmDeleteId = 'recipe:' + el.getAttribute('data-del-recipe');
+    recipesData.recipes.find(r=>r.id===el.getAttribute('data-del-recipe'))._open = true;
+    render();
+  }));
+  document.querySelectorAll('[data-confirm-del-recipe]').forEach(el=>el.addEventListener('click', ()=>{
+    recipesData.recipes = recipesData.recipes.filter(r=>r.id!==el.getAttribute('data-confirm-del-recipe'));
+    confirmDeleteId = null; queueSaveRecipes(); showToastMsg('Rezept gelöscht'); render();
+  }));
+  document.querySelectorAll('[data-cancel-del]').forEach(el=>el.addEventListener('click', ()=>{ confirmDeleteId = null; render(); }));
+
+  // ingredients
+  document.querySelectorAll('[data-add-ing-trigger]').forEach(el=>el.addEventListener('click', ()=>{
+    addingIngredientFor = el.getAttribute('data-add-ing-trigger'); render();
+    const inp = document.getElementById('ingName'); if(inp) inp.focus();
+  }));
+  document.querySelectorAll('[data-edit-ing]').forEach(el=>el.addEventListener('click', ()=>{
+    const [rid,iid] = el.getAttribute('data-edit-ing').split(':');
+    editingIngredient = {recipeId:rid, ingId:iid}; render();
+    const inp = document.getElementById('ingName'); if(inp) inp.focus();
+  }));
+  document.querySelectorAll('[data-del-ing]').forEach(el=>el.addEventListener('click', ()=>{
+    confirmDeleteId = 'ingredient:' + el.getAttribute('data-del-ing'); render();
+  }));
+  document.querySelectorAll('[data-confirm-del-ing]').forEach(el=>el.addEventListener('click', ()=>{
+    const [rid,iid] = el.getAttribute('data-confirm-del-ing').split(':');
+    const r = recipesData.recipes.find(r=>r.id===rid);
+    r.ingredients = r.ingredients.filter(i=>i.id!==iid);
+    confirmDeleteId = null; queueSaveRecipes(); render();
+  }));
+
+  const ingForm = document.querySelector('[data-ing-form]');
+  if(ingForm){
+    const [rid, iid] = ingForm.getAttribute('data-ing-form').split(':');
+    const ingNameInput = document.getElementById('ingName');
+    const suggestBox = document.getElementById('ingNameSuggestions');
+    const renderIngSuggestions = ()=>{
+      const term = ingNameInput.value.trim().toLowerCase();
+      if(!term){ suggestBox.innerHTML=''; return; }
+      const names = getAllProductNames().filter(n=>n.toLowerCase().includes(term)).slice(0,8);
+      if(names.length===0){ suggestBox.innerHTML=''; return; }
+      suggestBox.innerHTML = names.map(n=>`<div class="ing-suggestion-item" data-pick="${escapeHtml(n)}">${escapeHtml(n)}</div>`).join('');
+      suggestBox.querySelectorAll('[data-pick]').forEach(el=>el.addEventListener('click', ()=>{
+        ingNameInput.value = el.getAttribute('data-pick');
+        suggestBox.innerHTML = '';
+      }));
+    };
+    ingNameInput.addEventListener('input', renderIngSuggestions);
+    ingNameInput.addEventListener('focus', renderIngSuggestions);
+    document.getElementById('ingCancel').addEventListener('click', ()=>{ addingIngredientFor=null; editingIngredient=null; render(); });
+    document.getElementById('ingSave').addEventListener('click', ()=>{
+      const name = document.getElementById('ingName').value.trim();
+      const amount = Number(document.getElementById('ingAmount').value) || 0;
+      if(!name){ showToastMsg('Bitte einen Namen eingeben'); return; }
+      const r = recipesData.recipes.find(r=>r.id===rid);
+      if(iid){ const ing = r.ingredients.find(i=>i.id===iid); ing.name=name; ing.amount=amount; }
+      else { r.ingredients.push({id:uid(), name, amount}); }
+      addingIngredientFor = null; editingIngredient = null;
+      queueSaveRecipes(); render();
+    });
+    ['ingName','ingAmount'].forEach(id=>{
+      document.getElementById(id).addEventListener('keydown', e=>{ if(e.key==='Enter') document.getElementById('ingSave').click(); });
+    });
+  }
+
+  // steps
+  document.querySelectorAll('[data-add-step-trigger]').forEach(el=>el.addEventListener('click', ()=>{
+    addingStepFor = el.getAttribute('data-add-step-trigger'); render();
+    const inp = document.getElementById('stepText'); if(inp) inp.focus();
+  }));
+  document.querySelectorAll('[data-edit-step]').forEach(el=>el.addEventListener('click', ()=>{
+    const [rid,sid] = el.getAttribute('data-edit-step').split(':');
+    editingStep = {recipeId:rid, stepId:sid}; render();
+    const inp = document.getElementById('stepText'); if(inp) inp.focus();
+  }));
+  document.querySelectorAll('[data-del-step]').forEach(el=>el.addEventListener('click', ()=>{
+    confirmDeleteId = 'step:' + el.getAttribute('data-del-step'); render();
+  }));
+  document.querySelectorAll('[data-confirm-del-step]').forEach(el=>el.addEventListener('click', ()=>{
+    const [rid,sid] = el.getAttribute('data-confirm-del-step').split(':');
+    const r = recipesData.recipes.find(r=>r.id===rid);
+    r.steps = r.steps.filter(s=>s.id!==sid);
+    confirmDeleteId = null; queueSaveRecipes(); render();
+  }));
+
+  const stepForm = document.querySelector('[data-step-form]');
+  if(stepForm){
+    const [rid, sid] = stepForm.getAttribute('data-step-form').split(':');
+    document.getElementById('stepCancel').addEventListener('click', ()=>{ addingStepFor=null; editingStep=null; render(); });
+    document.getElementById('stepSave').addEventListener('click', ()=>{
+      const text = document.getElementById('stepText').value.trim();
+      if(!text){ showToastMsg('Bitte einen Text eingeben'); return; }
+      const r = recipesData.recipes.find(r=>r.id===rid);
+      if(sid){ const step = r.steps.find(s=>s.id===sid); step.text = text; }
+      else { r.steps.push({id:uid(), text}); }
+      addingStepFor = null; editingStep = null;
+      queueSaveRecipes(); render();
+    });
+    document.getElementById('stepText').addEventListener('keydown', e=>{ if(e.key==='Enter') document.getElementById('stepSave').click(); });
+  }
+
+  // cook
+  document.querySelectorAll('[data-cook]').forEach(el=>el.addEventListener('click', ()=>{
+    cookRecipe(el.getAttribute('data-cook'));
+  }));
+
+  // add recipe
+  const addTrigger = document.getElementById('addRecipeTrigger');
+  if(addTrigger) addTrigger.addEventListener('click', ()=>{
+    addingRecipe = true; render();
+    const inp = document.getElementById('newRecipeName'); if(inp) inp.focus();
+  });
+  const confirmAddRecipeBtn = document.getElementById('confirmAddRecipe');
+  if(confirmAddRecipeBtn){
+    confirmAddRecipeBtn.addEventListener('click', ()=>{
+      const name = document.getElementById('newRecipeName').value.trim();
+      if(!name){ showToastMsg('Bitte einen Namen eingeben'); return; }
+      recipesData.recipes.push({id:uid(), name, ingredients:[], steps:[], _open:true});
+      addingRecipe = false;
+      queueSaveRecipes(); render();
+    });
+    document.getElementById('newRecipeName').addEventListener('keydown', e=>{ if(e.key==='Enter') confirmAddRecipeBtn.click(); });
+  }
+}
+
+document.getElementById('searchInput').addEventListener('input', render);
+
+document.getElementById('scanBarcodeBtn').addEventListener('click', openBarcodeScanner);
+
+document.getElementById('tabInventar').addEventListener('click', ()=>{
+  activeTab = 'inventar';
+  document.getElementById('tabInventar').classList.add('active');
+  document.getElementById('tabRezepte').classList.remove('active');
+  render();
+});
+document.getElementById('tabRezepte').addEventListener('click', ()=>{
+  activeTab = 'rezepte';
+  document.getElementById('tabRezepte').classList.add('active');
+  document.getElementById('tabInventar').classList.remove('active');
+  render();
+});
+
+document.getElementById('logoutTrigger').addEventListener('click', async ()=>{
+  await signOut(auth);
+  showToastMsg('Abgemeldet');
+});
+
+initLock();
+</script>
+</body>
+</html>
