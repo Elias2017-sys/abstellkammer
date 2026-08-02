@@ -203,6 +203,21 @@ main{padding:8px 4px 0;}
 .cook-btn.blocked{background:var(--surface-alt); color:var(--ink-soft); cursor:not-allowed;}
 .cook-hint{font-size:11.5px; color:var(--ink-soft); text-align:center; margin-top:6px;}
 
+/* ---- Shopping list ---- */
+.threshold-row{display:flex; align-items:center; gap:8px; background:var(--surface); border:1.5px solid var(--border); border-radius:10px; padding:9px 12px; margin-bottom:12px; font-size:13px;}
+.threshold-row input{width:50px; font-family:'JetBrains Mono',monospace; font-size:14px; text-align:center; border:1.5px solid var(--border); border-radius:7px; padding:5px; outline:none; background:var(--surface-alt);}
+.threshold-row input:focus{border-color:var(--accent);}
+.shop-item{display:flex; align-items:center; gap:10px; background:var(--surface); border:1.5px solid var(--border); border-radius:10px; padding:10px 12px; margin-bottom:8px;}
+.shop-check{width:22px; height:22px; border-radius:50%; border:2px solid var(--sage); background:transparent; cursor:pointer; flex:0 0 auto; display:flex; align-items:center; justify-content:center; color:var(--sage); font-size:13px;}
+.shop-check:hover{background:var(--sage-soft);}
+.shop-main{flex:1; min-width:0;}
+.shop-name{font-size:14px; font-weight:500;}
+.shop-sub{font-family:'JetBrains Mono',monospace; font-size:11px; color:var(--ink-soft); margin-top:1px;}
+.shop-add-row{display:flex; gap:8px; margin-top:4px; margin-bottom:20px;}
+.shop-add-row input{flex:1; font-family:'Inter',sans-serif; font-size:13.5px; border:1.5px solid var(--border); border-radius:8px; padding:9px 10px; outline:none; background:var(--surface);}
+.shop-add-row input:focus{border-color:var(--accent);}
+.shop-add-row button{border:none; border-radius:8px; background:var(--accent); color:#fff; font-weight:600; font-size:13px; padding:9px 16px; cursor:pointer;}
+
 @media (prefers-reduced-motion: reduce){ *{transition:none !important;} }
 </style>
 </head>
@@ -224,6 +239,7 @@ main{padding:8px 4px 0;}
       <button class="tab-btn active" id="tabInventar">📦 Inventar</button>
       <button class="tab-btn" id="tabRezepte">🍳 Rezepte</button>
       <button class="tab-btn" id="tabGefrier">🧊 Gefrierschränke</button>
+      <button class="tab-btn" id="tabEinkauf">🛒 Einkaufsliste</button>
     </div>
     <div id="inventarHeaderExtra">
       <div class="search-box">
@@ -240,6 +256,12 @@ main{padding:8px 4px 0;}
       </div>
       <button class="scan-btn" id="scanBarcodeBtnFreezer">📷 Barcode scannen</button>
       <div class="stats-row" id="freezerStatsRow"></div>
+    </div>
+    <div id="einkaufHeaderExtra" style="display:none;">
+      <div class="search-box">
+        <span class="search-icon">⌕</span>
+        <input id="shopSearchInput" type="text" placeholder="Auf der Liste suchen …" autocomplete="off">
+      </div>
     </div>
   </header>
 
@@ -326,6 +348,9 @@ let editingFreezerItem = null;   // {freezerId, boardId, itemId}
 let addingFreezerItemFor = null; // {freezerId, boardId}
 let addingFreezer = false;
 
+let shoppingListData = { threshold: 3, dismissed: {}, manual: [] };
+let saveTimerShopping = null;
+
 let scanStream = null;
 let scanDetectorInterval = null;
 let pendingBarcodePhoto = null;
@@ -351,8 +376,30 @@ async function loadData(){
   })));
   await loadRecipes();
   await loadFreezerData(photoMap);
+  await loadShoppingListData();
   render();
 }
+
+async function loadShoppingListData(){
+  const res = await fsGetDoc('shoppinglist');
+  if(res){
+    shoppingListData = {
+      threshold: typeof res.threshold === 'number' ? res.threshold : 3,
+      dismissed: res.dismissed || {},
+      manual: Array.isArray(res.manual) ? res.manual : []
+    };
+  } else {
+    shoppingListData = { threshold: 3, dismissed: {}, manual: [] };
+  }
+}
+
+async function saveShoppingListData(showToast){
+  const ok = await fsSetDoc('shoppinglist', shoppingListData);
+  storageOk = ok;
+  if(showToast) showToastMsg('Gespeichert');
+  renderStatus();
+}
+function queueSaveShopping(){ clearTimeout(saveTimerShopping); saveTimerShopping = setTimeout(()=>saveShoppingListData(false), 400); }
 
 async function loadFreezerData(photoMap){
   const res = await fsGetDoc('freezers');
@@ -567,10 +614,12 @@ function render(){
   const main = document.getElementById('mainArea');
   const extra = document.getElementById('inventarHeaderExtra');
   const freezerExtra = document.getElementById('freezerHeaderExtra');
+  const einkaufExtra = document.getElementById('einkaufHeaderExtra');
 
   if(activeTab === 'rezepte'){
     extra.style.display = 'none';
     freezerExtra.style.display = 'none';
+    einkaufExtra.style.display = 'none';
     main.innerHTML = renderRecipesTab();
     attachRecipeHandlers();
     renderStatus();
@@ -579,6 +628,7 @@ function render(){
   if(activeTab === 'gefrier'){
     extra.style.display = 'none';
     freezerExtra.style.display = 'block';
+    einkaufExtra.style.display = 'none';
     renderFreezerStats();
     const fzTerm = document.getElementById('freezerSearchInput').value.trim().toLowerCase();
     if(fzTerm.length > 0){
@@ -590,8 +640,19 @@ function render(){
     renderStatus();
     return;
   }
+  if(activeTab === 'einkauf'){
+    extra.style.display = 'none';
+    freezerExtra.style.display = 'none';
+    einkaufExtra.style.display = 'block';
+    const shopTerm = document.getElementById('shopSearchInput').value.trim().toLowerCase();
+    main.innerHTML = renderShoppingListTab(shopTerm);
+    attachShoppingListHandlers();
+    renderStatus();
+    return;
+  }
   extra.style.display = 'block';
   freezerExtra.style.display = 'none';
+  einkaufExtra.style.display = 'none';
 
   renderStats();
   const term = document.getElementById('searchInput').value.trim().toLowerCase();
@@ -775,6 +836,7 @@ function renderItemForm(shelf, board, item){
       <input type="number" id="formReihe" placeholder="z.B. 2" value="${isEdit && item.reihe!=null ? escapeHtml(String(item.reihe)) : ''}">
       <label>Menge</label>
       <input type="number" id="formQty" placeholder="Anzahl" value="${isEdit ? item.qty : 1}" min="0">
+      ${renderUnitsPerScanField('formUnits', isEdit ? item.unitsPerScan : 1, false, null)}
       <label>Notiz (optional)</label>
       <input type="text" id="formNote" placeholder="z.B. läuft bald ab" value="${isEdit?escapeHtml(item.note||''):''}">
       <label>Foto</label>
@@ -1235,20 +1297,25 @@ function renderFreezerItemForm(freezer, board, item){
   const isEdit = !!item;
   const photoSrc = pendingPhoto !== null ? pendingPhoto : (isEdit ? item.photo : null);
   return `
-  <div class="add-item-row edit-form" data-freezer-item-form="${freezer.id}:${board.id}:${isEdit?item.id:''}">
-    <input type="text" id="fzFormName" placeholder="Bezeichnung" value="${isEdit?escapeHtml(item.name):''}">
-    <input type="number" id="fzFormQty" placeholder="Anzahl" value="${isEdit ? item.qty : 1}" min="0">
-    <input type="text" id="fzFormNote" placeholder="Notiz (optional)" value="${isEdit?escapeHtml(item.note||''):''}">
-    <div class="photo-row">
+  <div class="add-shelf-card" data-freezer-item-form="${freezer.id}:${board.id}:${isEdit?item.id:''}">
+    <div class="scan-form">
+      <label>Bezeichnung</label>
+      <input type="text" id="fzFormName" placeholder="Bezeichnung" value="${isEdit?escapeHtml(item.name):''}">
+      <label>Menge</label>
+      <input type="number" id="fzFormQty" placeholder="Anzahl" value="${isEdit ? item.qty : 1}" min="0">
+      ${renderUnitsPerScanField('fzFormUnits', isEdit ? item.unitsPerScan : 1, false, null)}
+      <label>Notiz (optional)</label>
+      <input type="text" id="fzFormNote" placeholder="z.B. läuft bald ab" value="${isEdit?escapeHtml(item.note||''):''}">
+      <label>Foto</label>
       <input type="file" accept="image/*" capture="environment" id="fzFormPhotoInput" style="display:none;">
-      <button type="button" class="photo-btn" id="fzFormPhotoTrigger">📷 ${photoSrc ? 'Foto ersetzen' : 'Foto aufnehmen'}</button>
-      ${photoSrc ? `<img src="${photoSrc}" style="width:34px;height:34px;border-radius:7px;object-fit:cover;border:1px solid var(--border);">` : ''}
-      ${photoSrc ? `<button type="button" class="photo-remove" id="fzFormPhotoRemove">entfernen</button>` : ''}
+      <div style="display:flex; align-items:center; gap:8px; margin-top:4px;">
+        <button type="button" class="photo-btn" id="fzFormPhotoTrigger">📷 ${photoSrc ? 'Foto ersetzen' : 'Foto aufnehmen'}</button>
+        ${photoSrc ? `<img src="${photoSrc}" style="width:34px;height:34px;border-radius:7px;object-fit:cover;border:1px solid var(--border);">` : ''}
+        ${photoSrc ? `<button type="button" class="photo-remove" id="fzFormPhotoRemove">entfernen</button>` : ''}
+      </div>
     </div>
-    <div class="edit-actions">
-      <button class="btn-save" id="fzFormSave">${isEdit?'Speichern':'Hinzufügen'}</button>
-      <button class="btn-cancel" id="fzFormCancel">Abbrechen</button>
-    </div>
+    <button class="scan-save-btn" id="fzFormSave">${isEdit?'Speichern':'Hinzufügen'}</button>
+    <button type="button" class="lock-hint" id="fzFormCancel" style="cursor:pointer; text-align:center; margin-top:8px; width:100%; background:none; border:none; font-family:inherit;">Abbrechen</button>
   </div>`;
 }
 
@@ -1373,6 +1440,7 @@ function attachFreezerHandlers(){
   const fzForm = document.querySelector('[data-freezer-item-form]');
   if(fzForm){
     const [fid, bid, iid] = fzForm.getAttribute('data-freezer-item-form').split(':');
+    attachUnitsToggle('fzFormUnits');
     const photoTrigger = document.getElementById('fzFormPhotoTrigger');
     const photoInput = document.getElementById('fzFormPhotoInput');
     const photoRemove = document.getElementById('fzFormPhotoRemove');
@@ -1393,6 +1461,7 @@ function attachFreezerHandlers(){
       const name = document.getElementById('fzFormName').value.trim();
       const qty = Number(document.getElementById('fzFormQty').value) || 0;
       const note = document.getElementById('fzFormNote').value.trim();
+      const unitsPerScan = Math.max(1, Number(document.getElementById('fzFormUnitsUnitsPerScan').value) || 1);
       if(!name){ showToastMsg('Bitte eine Bezeichnung eingeben'); return; }
 
       let finalPhoto;
@@ -1403,9 +1472,9 @@ function attachFreezerHandlers(){
       const board = freezerData.freezers.find(f=>f.id===fid).boards.find(b=>b.id===bid);
       if(iid){
         const item = board.items.find(i=>i.id===iid);
-        item.name = name; item.qty = qty; item.note = note; item.photo = finalPhoto;
+        item.name = name; item.qty = qty; item.note = note; item.photo = finalPhoto; item.unitsPerScan = unitsPerScan;
       } else {
-        board.items.push({id:uid(), name, qty, note, photo: finalPhoto});
+        board.items.push({id:uid(), name, qty, note, photo: finalPhoto, unitsPerScan});
       }
       editingFreezerItem = null; addingFreezerItemFor = null; pendingPhoto = null;
       queueSaveFreezer(); render();
@@ -1437,6 +1506,125 @@ function attachFreezerHandlers(){
     document.getElementById('newFreezerName').addEventListener('keydown', e=>{ if(e.key==='Enter') confirmAddFreezerBtn.click(); });
     document.getElementById('newFreezerBoards').addEventListener('keydown', e=>{ if(e.key==='Enter') confirmAddFreezerBtn.click(); });
   }
+}
+
+// ---------- Shopping list ----------
+
+function collectLowStockItems(){
+  const results = [];
+  const threshold = Number(shoppingListData.threshold) || 3;
+
+  data.shelves.forEach(shelf=>{
+    let realIdx = 0;
+    shelf.boards.forEach(board=>{
+      const letter = board.floor ? 'Boden' : boardLetter(realIdx);
+      if(!board.floor) realIdx++;
+      board.items.forEach(item=>{
+        const qty = Number(item.qty)||0;
+        if(qty <= threshold){
+          results.push({ id:item.id, name:item.name, qty, location: `${shelf.name} · ${letter}` });
+        }
+      });
+    });
+  });
+
+  freezerData.freezers.forEach(fz=>{
+    fz.boards.forEach((board, idx)=>{
+      const letter = boardLetter(idx);
+      board.items.forEach(item=>{
+        const qty = Number(item.qty)||0;
+        if(qty <= threshold){
+          results.push({ id:item.id, name:item.name, qty, location: `${fz.name} · Fach ${letter}` });
+        }
+      });
+    });
+  });
+
+  // Nur Einträge zeigen, die nicht bei genau dieser Menge schon "erledigt" markiert wurden
+  return results.filter(r => shoppingListData.dismissed[r.id] !== r.qty);
+}
+
+function renderShoppingListTab(term){
+  const t = (term||'').toLowerCase();
+  let lowStock = collectLowStockItems();
+  let manual = shoppingListData.manual;
+  if(t){
+    lowStock = lowStock.filter(r=>r.name.toLowerCase().includes(t));
+    manual = manual.filter(m=>m.name.toLowerCase().includes(t));
+  }
+  return `
+    <div class="threshold-row">
+      Automatisch auf die Liste, wenn Menge ≤
+      <input type="number" id="thresholdInput" value="${shoppingListData.threshold}" min="0">
+      ist
+    </div>
+
+    <div class="section-label">Wird knapp (automatisch)</div>
+    ${lowStock.length === 0
+      ? `<div style="color:var(--ink-soft); font-size:12.5px; padding:2px 2px 12px;">${t ? 'Nichts gefunden.' : 'Gerade ist nichts knapp.'}</div>`
+      : lowStock.map(r => `
+        <div class="shop-item">
+          <button class="shop-check" data-dismiss-low="${r.id}:${r.qty}" title="Erledigt">✓</button>
+          <div class="shop-main">
+            <div class="shop-name">${escapeHtml(r.name)}</div>
+            <div class="shop-sub">${escapeHtml(r.location)} · noch ${r.qty}</div>
+          </div>
+        </div>
+      `).join('')
+    }
+
+    <div class="section-label">Sonstiges</div>
+    ${manual.length === 0
+      ? `<div style="color:var(--ink-soft); font-size:12.5px; padding:2px 2px 6px;">${t ? 'Nichts gefunden.' : 'Noch nichts von Hand hinzugefügt.'}</div>`
+      : manual.map(m => `
+        <div class="shop-item">
+          <button class="shop-check" data-dismiss-manual="${m.id}" title="Erledigt">✓</button>
+          <div class="shop-main"><div class="shop-name">${escapeHtml(m.name)}</div></div>
+        </div>
+      `).join('')
+    }
+    <div class="shop-add-row">
+      <input type="text" id="newManualItem" placeholder="Weiteren Artikel hinzufügen …">
+      <button id="confirmAddManual">Hinzufügen</button>
+    </div>
+  `;
+}
+
+function attachShoppingListHandlers(){
+  const thresholdInput = document.getElementById('thresholdInput');
+  thresholdInput.addEventListener('change', ()=>{
+    const val = Math.max(0, Number(thresholdInput.value) || 0);
+    shoppingListData.threshold = val;
+    queueSaveShopping();
+    render();
+  });
+
+  document.querySelectorAll('[data-dismiss-low]').forEach(el=>el.addEventListener('click', ()=>{
+    const [id, qty] = el.getAttribute('data-dismiss-low').split(':');
+    shoppingListData.dismissed[id] = Number(qty);
+    queueSaveShopping();
+    showToastMsg('Erledigt');
+    render();
+  }));
+
+  document.querySelectorAll('[data-dismiss-manual]').forEach(el=>el.addEventListener('click', ()=>{
+    const id = el.getAttribute('data-dismiss-manual');
+    shoppingListData.manual = shoppingListData.manual.filter(m=>m.id!==id);
+    queueSaveShopping();
+    showToastMsg('Erledigt');
+    render();
+  }));
+
+  const confirmBtn = document.getElementById('confirmAddManual');
+  const input = document.getElementById('newManualItem');
+  confirmBtn.addEventListener('click', ()=>{
+    const name = input.value.trim();
+    if(!name){ showToastMsg('Bitte einen Namen eingeben'); return; }
+    shoppingListData.manual.push({ id: uid(), name });
+    queueSaveShopping();
+    render();
+  });
+  input.addEventListener('keydown', e=>{ if(e.key==='Enter') confirmBtn.click(); });
 }
 
 // ---------- Barcode scanner ----------
@@ -1617,7 +1805,8 @@ function handleBarcodeDetected(code){
 
   if(scanMode === 'remove'){
     if(match){
-      match.item.qty = Math.max(0, (Number(match.item.qty)||0) - 1);
+      const perScan = Math.max(1, Number(match.item.unitsPerScan) || 1);
+      match.item.qty = Math.max(0, (Number(match.item.qty)||0) - perScan);
       save();
       showToastMsg(`${match.item.name}: Menge auf ${match.item.qty} verringert`);
       afterQuickScanFeedback(`✅ ${match.item.name} entnommen (jetzt ${match.item.qty}) – nächsten Barcode scannen …`);
@@ -1630,14 +1819,43 @@ function handleBarcodeDetected(code){
 
   // add mode
   if(match){
-    match.item.qty = (Number(match.item.qty)||0) + 1;
+    const perScan = Math.max(1, Number(match.item.unitsPerScan) || 1);
+    match.item.qty = (Number(match.item.qty)||0) + perScan;
     save();
-    showToastMsg(`${match.item.name}: Menge auf ${match.item.qty} erhöht`);
+    showToastMsg(`${match.item.name}: Menge auf ${match.item.qty} erhöht (+${perScan})`);
     afterQuickScanFeedback(`✅ ${match.item.name} hinzugefügt (jetzt ${match.item.qty}) – nächsten Barcode scannen …`);
     return;
   }
   stopScanCamera();
   showNewBarcodeItemForm(code);
+}
+
+function detectUnitsFromQuantity(qtyStr){
+  if(!qtyStr) return null;
+  const s = qtyStr.toLowerCase();
+  let m = s.match(/(\d+)\s*[x×]\s*\d/);          // z.B. "6 x 65 g"
+  if(m) return parseInt(m[1]);
+  m = s.match(/(\d+)\s*(stück|stk\.?|st\.)/);     // z.B. "6 Stück", "6 Stk"
+  if(m) return parseInt(m[1]);
+  m = s.match(/(\d+)\s*er\b/);                    // z.B. "6er"
+  if(m) return parseInt(m[1]);
+  m = s.match(/netz.*?(\d+)|(\d+).*?netz/);        // z.B. "Netz 6 Stück"
+  if(m) return parseInt(m[1] || m[2]);
+  return null;
+}
+
+// Typische Netz-/Beutelware, bei der öfter mehrere Stück in einer Packung sind,
+// auch wenn die Datenbank keine genaue Stückzahl angibt.
+const NET_PRODUCT_KEYWORDS = [
+  'zwiebel','kartoffel','knoblauch','schalotte','mandarine','clementine',
+  'zitrone','limette','möhre','karotte','apfel','äpfel','orange','pfirsich',
+  'nektarine','avocado','kiwi'
+];
+
+function nameSuggestsNetProduct(name){
+  if(!name) return false;
+  const s = name.toLowerCase();
+  return NET_PRODUCT_KEYWORDS.some(k => s.includes(k));
 }
 
 async function lookupOpenFoodFacts(code){
@@ -1651,10 +1869,33 @@ async function lookupOpenFoodFacts(code){
       // Nur echte "Front of Pack"-Produktfotos übernehmen. p.image_url ist oft nur ein
       // schnelles Roh-Foto vom Scannen (mit Barcode-Rahmen) und wird bewusst NICHT genutzt.
       const photo = p.image_front_url || null;
-      return { name, photo };
+      const detectedUnits = detectUnitsFromQuantity(p.quantity || p.product_quantity_unit || '');
+      // Wenn keine genaue Zahl gefunden wurde, aber der Name auf typische Netzware hindeutet
+      // (Zwiebeln, Kartoffeln, ...), das Feld trotzdem aufklappen, damit die Stückzahl von Hand
+      // eingetragen werden kann.
+      const likelyNetProduct = !detectedUnits && nameSuggestsNetProduct(name);
+      return { name, photo, detectedUnits, likelyNetProduct };
     }
   } catch(e){ /* Datenbank nicht erreichbar oder Produkt unbekannt */ }
   return null;
+}
+
+function renderUnitsPerScanField(idPrefix, currentValue, expandedByDefault, hint){
+  const val = currentValue && currentValue > 1 ? currentValue : 1;
+  const expanded = !!(expandedByDefault || (currentValue && currentValue > 1));
+  return `
+    <button type="button" class="add-shelf-trigger" id="${idPrefix}ToggleBtn" style="padding:4px 2px; font-size:12.5px; ${expanded?'display:none;':''}">🔢 Mehrere Stück pro Packung? (z.B. Netz)</button>
+    <div id="${idPrefix}FieldWrap" style="${expanded?'':'display:none;'}">
+      <label>Stück pro Packung${hint ? ` <span style="color:var(--sage); font-weight:400;">(${escapeHtml(hint)})</span>` : ''}</label>
+      <input type="number" id="${idPrefix}UnitsPerScan" value="${val}" min="1">
+    </div>
+  `;
+}
+
+function attachUnitsToggle(idPrefix){
+  const btn = document.getElementById(idPrefix+'ToggleBtn');
+  const wrap = document.getElementById(idPrefix+'FieldWrap');
+  if(btn) btn.addEventListener('click', ()=>{ btn.style.display='none'; wrap.style.display='block'; });
 }
 
 async function showNewBarcodeItemForm(code){
@@ -1712,6 +1953,14 @@ async function showNewBarcodeItemForm(code){
         <input type="number" id="scanReihe" placeholder="z.B. 2">`}
         <label>Menge</label>
         <input type="number" id="scanQty" value="1" min="0">
+        ${renderUnitsPerScanField(
+          'scanUnits',
+          (offResult && offResult.detectedUnits) || 1,
+          !!(offResult && (offResult.detectedUnits || offResult.likelyNetProduct)),
+          (offResult && offResult.detectedUnits) ? 'automatisch erkannt – bitte prüfen'
+            : (offResult && offResult.likelyNetProduct) ? 'wird oft im Netz verkauft – Stückzahl eintragen'
+            : null
+        )}
         <label>Foto</label>
         <input type="file" accept="image/*" capture="environment" id="scanPhotoInput" style="display:none;">
         <button type="button" class="photo-btn" id="scanPhotoTrigger" style="margin-top:4px;">📷 ${pendingBarcodePhoto?'Foto ersetzen':'Foto aufnehmen'}</button>
@@ -1721,6 +1970,7 @@ async function showNewBarcodeItemForm(code){
     `;
     document.getElementById('scanCloseBtn').addEventListener('click', closeScanner);
     document.getElementById('scanShelfSelect').addEventListener('change', (e)=>renderForm(e.target.value));
+    attachUnitsToggle('scanUnits');
     document.getElementById('scanPhotoTrigger').addEventListener('click', ()=>document.getElementById('scanPhotoInput').click());
     document.getElementById('scanPhotoInput').addEventListener('change', async ()=>{
       const file = document.getElementById('scanPhotoInput').files[0];
@@ -1736,13 +1986,14 @@ async function showNewBarcodeItemForm(code){
       const boardId = document.getElementById('scanBoardSelect').value;
       const reiheRaw = isFreezer ? '' : document.getElementById('scanReihe').value;
       const qty = Number(document.getElementById('scanQty').value) || 0;
+      const unitsPerScan = Math.max(1, Number(document.getElementById('scanUnitsUnitsPerScan').value) || 1);
       if(!name){ showToastMsg('Bitte eine Bezeichnung eingeben'); return; }
       if(!boardId){ showToastMsg(`Bitte zuerst ein ${isFreezer?'Fach':'Brett'} anlegen`); return; }
       const targetContainer = containers.find(s=>s.id===document.getElementById('scanShelfSelect').value);
       const board = targetContainer.boards.find(b=>b.id===boardId);
       const newItem = {
         id:uid(), name, qty,
-        note:'', photo: pendingBarcodePhoto || null, barcode: code
+        note:'', photo: pendingBarcodePhoto || null, barcode: code, unitsPerScan
       };
       if(!isFreezer) newItem.reihe = reiheRaw==='' ? null : Number(reiheRaw);
       board.items.push(newItem);
@@ -1870,6 +2121,7 @@ function attachAllHandlers(){
   const form = document.querySelector('[data-item-form]');
   if(form){
     const [sid, bid, iid] = form.getAttribute('data-item-form').split(':');
+    attachUnitsToggle('formUnits');
     const photoTrigger = document.getElementById('formPhotoTrigger');
     const photoInput = document.getElementById('formPhotoInput');
     const photoRemove = document.getElementById('formPhotoRemove');
@@ -1893,6 +2145,7 @@ function attachAllHandlers(){
       const reiheRaw = document.getElementById('formReihe').value;
       const qty = Number(document.getElementById('formQty').value) || 0;
       const note = document.getElementById('formNote').value.trim();
+      const unitsPerScan = Math.max(1, Number(document.getElementById('formUnitsUnitsPerScan').value) || 1);
       if(!name){ showToastMsg('Bitte eine Bezeichnung eingeben'); return; }
       const reihe = reiheRaw === '' ? null : Number(reiheRaw);
 
@@ -1907,10 +2160,10 @@ function attachAllHandlers(){
 
       if(iid){
         const item = findItem(sid,bid,iid);
-        item.name = name; item.qty = qty; item.note = note; item.reihe = reihe; item.photo = finalPhoto;
+        item.name = name; item.qty = qty; item.note = note; item.reihe = reihe; item.photo = finalPhoto; item.unitsPerScan = unitsPerScan;
       } else {
         const board = findBoard(sid,bid);
-        board.items.push({id:uid(), name, qty, note, reihe, photo: finalPhoto});
+        board.items.push({id:uid(), name, qty, note, reihe, photo: finalPhoto, unitsPerScan});
       }
       editingItem = null; addingItemFor = null; pendingPhoto = null;
       queueSave(); render();
@@ -2096,6 +2349,7 @@ function attachRecipeHandlers(){
 
 document.getElementById('searchInput').addEventListener('input', render);
 document.getElementById('freezerSearchInput').addEventListener('input', render);
+document.getElementById('shopSearchInput').addEventListener('input', render);
 
 document.getElementById('scanBarcodeBtn').addEventListener('click', ()=>openBarcodeScanner('inventar'));
 document.getElementById('scanBarcodeBtnFreezer').addEventListener('click', ()=>openBarcodeScanner('gefrier'));
@@ -2104,6 +2358,7 @@ function setActiveTabButton(tab){
   document.getElementById('tabInventar').classList.toggle('active', tab==='inventar');
   document.getElementById('tabRezepte').classList.toggle('active', tab==='rezepte');
   document.getElementById('tabGefrier').classList.toggle('active', tab==='gefrier');
+  document.getElementById('tabEinkauf').classList.toggle('active', tab==='einkauf');
 }
 
 document.getElementById('tabInventar').addEventListener('click', ()=>{
@@ -2114,6 +2369,9 @@ document.getElementById('tabRezepte').addEventListener('click', ()=>{
 });
 document.getElementById('tabGefrier').addEventListener('click', ()=>{
   activeTab = 'gefrier'; setActiveTabButton('gefrier'); render();
+});
+document.getElementById('tabEinkauf').addEventListener('click', ()=>{
+  activeTab = 'einkauf'; setActiveTabButton('einkauf'); render();
 });
 
 document.getElementById('logoutTrigger').addEventListener('click', async ()=>{
