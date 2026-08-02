@@ -1162,7 +1162,9 @@ async function lookupOpenFoodFacts(code){
     if(json && json.status === 1 && json.product){
       const p = json.product;
       const name = p.product_name_de || p.product_name || p.generic_name_de || p.generic_name || '';
-      const photo = p.image_front_url || p.image_url || null;
+      // Nur echte "Front of Pack"-Produktfotos übernehmen. p.image_url ist oft nur ein
+      // schnelles Roh-Foto vom Scannen (mit Barcode-Rahmen) und wird bewusst NICHT genutzt.
+      const photo = p.image_front_url || null;
       return { name, photo };
     }
   } catch(e){ /* Datenbank nicht erreichbar oder Produkt unbekannt */ }
