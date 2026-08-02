@@ -223,6 +223,7 @@ main{padding:8px 4px 0;}
     <div class="tab-bar">
       <button class="tab-btn active" id="tabInventar">📦 Inventar</button>
       <button class="tab-btn" id="tabRezepte">🍳 Rezepte</button>
+      <button class="tab-btn" id="tabGefrier">🧊 Gefrierschränke</button>
     </div>
     <div id="inventarHeaderExtra">
       <div class="search-box">
@@ -231,6 +232,14 @@ main{padding:8px 4px 0;}
       </div>
       <button class="scan-btn" id="scanBarcodeBtn">📷 Barcode scannen</button>
       <div class="stats-row" id="statsRow"></div>
+    </div>
+    <div id="freezerHeaderExtra" style="display:none;">
+      <div class="search-box">
+        <span class="search-icon">⌕</span>
+        <input id="freezerSearchInput" type="text" placeholder="Gegenstand suchen …" autocomplete="off">
+      </div>
+      <button class="scan-btn" id="scanBarcodeBtnFreezer">📷 Barcode scannen</button>
+      <div class="stats-row" id="freezerStatsRow"></div>
     </div>
   </header>
 
@@ -300,7 +309,7 @@ let addingShelf = false;
 
 let pendingPhoto = null;        // dataURL currently staged for the open add/edit form
 
-let activeTab = 'inventar';     // 'inventar' | 'rezepte'
+let activeTab = 'inventar';     // 'inventar' | 'rezepte' | 'gefrier'
 let recipesData = { recipes: [] };
 let saveTimerRecipes = null;
 let editingRecipeId = null;
@@ -310,10 +319,18 @@ let editingIngredient = null;   // {recipeId, ingId}
 let addingStepFor = null;       // recipeId
 let editingStep = null;         // {recipeId, stepId}
 
+let freezerData = { freezers: [] };
+let saveTimerFreezer = null;
+let editingFreezerId = null;
+let editingFreezerItem = null;   // {freezerId, boardId, itemId}
+let addingFreezerItemFor = null; // {freezerId, boardId}
+let addingFreezer = false;
+
 let scanStream = null;
 let scanDetectorInterval = null;
 let pendingBarcodePhoto = null;
 let scanMode = 'add';           // 'add' | 'remove'
+let scanTarget = 'inventar';    // 'inventar' | 'gefrier'
 let lastScan = {code:null, time:0};
 
 function uid(){ return Date.now().toString(36) + Math.random().toString(36).slice(2,7); }
@@ -333,8 +350,49 @@ async function loadData(){
     item.photo = photoMap[item.id] || null;
   })));
   await loadRecipes();
+  await loadFreezerData(photoMap);
   render();
 }
+
+async function loadFreezerData(photoMap){
+  const res = await fsGetDoc('freezers');
+  if(res && Array.isArray(res.freezers)){
+    freezerData = res;
+    freezerData.freezers.forEach(fz=>{ if(!Array.isArray(fz.boards)) fz.boards = []; });
+  } else {
+    freezerData = { freezers: [] };
+  }
+  const map = photoMap || await fsGetAllPhotos();
+  freezerData.freezers.forEach(fz=>fz.boards.forEach(board=>board.items.forEach(item=>{
+    item.photo = map[item.id] || null;
+  })));
+}
+
+async function saveFreezerData(showToast){
+  try{
+    const photoWrites = [];
+    const lightweightFreezers = freezerData.freezers.map(fz => ({
+      ...fz,
+      boards: fz.boards.map(board => ({
+        ...board,
+        items: board.items.map(item => {
+          const { photo, ...rest } = item;
+          photoWrites.push(fsSetPhoto(item.id, photo || null));
+          return rest;
+        })
+      }))
+    }));
+    const ok = await fsSetDoc('freezers', { freezers: lightweightFreezers });
+    await Promise.all(photoWrites);
+    storageOk = ok;
+    if(showToast) showToastMsg('Gespeichert');
+  } catch(e){
+    storageOk = false;
+    showToastMsg('Speichern fehlgeschlagen');
+  }
+  renderStatus();
+}
+function queueSaveFreezer(){ clearTimeout(saveTimerFreezer); saveTimerFreezer = setTimeout(()=>saveFreezerData(false), 400); }
 
 async function saveData(showToast){
   try{
@@ -508,15 +566,32 @@ function showPhotoOverlay(src){
 function render(){
   const main = document.getElementById('mainArea');
   const extra = document.getElementById('inventarHeaderExtra');
+  const freezerExtra = document.getElementById('freezerHeaderExtra');
 
   if(activeTab === 'rezepte'){
     extra.style.display = 'none';
+    freezerExtra.style.display = 'none';
     main.innerHTML = renderRecipesTab();
     attachRecipeHandlers();
     renderStatus();
     return;
   }
+  if(activeTab === 'gefrier'){
+    extra.style.display = 'none';
+    freezerExtra.style.display = 'block';
+    renderFreezerStats();
+    const fzTerm = document.getElementById('freezerSearchInput').value.trim().toLowerCase();
+    if(fzTerm.length > 0){
+      main.innerHTML = renderFreezerSearchResults(fzTerm);
+    } else {
+      main.innerHTML = renderFreezerTab();
+    }
+    attachFreezerHandlers();
+    renderStatus();
+    return;
+  }
   extra.style.display = 'block';
+  freezerExtra.style.display = 'none';
 
   renderStats();
   const term = document.getElementById('searchInput').value.trim().toLowerCase();
@@ -690,23 +765,26 @@ function renderItemForm(shelf, board, item){
   const isEdit = !!item;
   const photoSrc = pendingPhoto !== null ? pendingPhoto : (isEdit ? item.photo : null);
   return `
-  <div class="add-item-row edit-form" data-item-form="${shelf.id}:${board.id}:${isEdit?item.id:''}">
-    <input type="text" id="formName" placeholder="Bezeichnung" value="${isEdit?escapeHtml(item.name):''}">
-    <div class="edit-form-row">
-      <input type="number" class="inp-reihe" id="formReihe" placeholder="Reihe" value="${isEdit && item.reihe!=null ? escapeHtml(String(item.reihe)) : ''}">
-      <input type="number" id="formQty" placeholder="Anzahl" value="${isEdit ? item.qty : 1}" min="0" style="flex:1;">
-    </div>
-    <input type="text" id="formNote" placeholder="Notiz (optional)" value="${isEdit?escapeHtml(item.note||''):''}">
-    <div class="photo-row">
+  <div class="add-shelf-card" data-item-form="${shelf.id}:${board.id}:${isEdit?item.id:''}">
+    <div class="scan-form">
+      <label>Bezeichnung</label>
+      <input type="text" id="formName" placeholder="Bezeichnung" value="${isEdit?escapeHtml(item.name):''}">
+      <label>Reihe (optional)</label>
+      <input type="number" id="formReihe" placeholder="z.B. 2" value="${isEdit && item.reihe!=null ? escapeHtml(String(item.reihe)) : ''}">
+      <label>Menge</label>
+      <input type="number" id="formQty" placeholder="Anzahl" value="${isEdit ? item.qty : 1}" min="0">
+      <label>Notiz (optional)</label>
+      <input type="text" id="formNote" placeholder="z.B. läuft bald ab" value="${isEdit?escapeHtml(item.note||''):''}">
+      <label>Foto</label>
       <input type="file" accept="image/*" capture="environment" id="formPhotoInput" style="display:none;">
-      <button type="button" class="photo-btn" id="formPhotoTrigger">📷 ${photoSrc ? 'Foto ersetzen' : 'Foto aufnehmen'}</button>
-      ${photoSrc ? `<img src="${photoSrc}" style="width:34px;height:34px;border-radius:7px;object-fit:cover;border:1px solid var(--border);">` : ''}
-      ${photoSrc ? `<button type="button" class="photo-remove" id="formPhotoRemove">entfernen</button>` : ''}
+      <div style="display:flex; align-items:center; gap:8px; margin-top:4px;">
+        <button type="button" class="photo-btn" id="formPhotoTrigger">📷 ${photoSrc ? 'Foto ersetzen' : 'Foto aufnehmen'}</button>
+        ${photoSrc ? `<img src="${photoSrc}" style="width:34px;height:34px;border-radius:7px;object-fit:cover;border:1px solid var(--border);">` : ''}
+        ${photoSrc ? `<button type="button" class="photo-remove" id="formPhotoRemove">entfernen</button>` : ''}
+      </div>
     </div>
-    <div class="edit-actions">
-      <button class="btn-save" id="formSave">${isEdit?'Speichern':'Hinzufügen'}</button>
-      <button class="btn-cancel" id="formCancel">Abbrechen</button>
-    </div>
+    <button class="scan-save-btn" id="formSave">${isEdit?'Speichern':'Hinzufügen'}</button>
+    <button type="button" class="lock-hint" id="formCancel" style="cursor:pointer; text-align:center; margin-top:8px; width:100%; background:none; border:none; font-family:inherit;">Abbrechen</button>
   </div>`;
 }
 
@@ -959,27 +1037,400 @@ function renderAddRecipe(){
     </div>`;
 }
 
+// ---------- Freezers (Gefrierschränke): rendering ----------
+
+function renderFreezerStats(){
+  const freezerCount = freezerData.freezers.length;
+  const boardCount = freezerData.freezers.reduce((s,fz)=>s+fz.boards.length,0);
+  const itemCount = freezerData.freezers.reduce((s,fz)=>s+fz.boards.reduce((a,b)=>a+b.items.length,0),0);
+  document.getElementById('freezerStatsRow').innerHTML = `
+    <span class="stat-pill">${freezerCount} Schränke</span>
+    <span class="stat-pill">${boardCount} Fächer</span>
+    <span class="stat-pill">${itemCount} Positionen</span>`;
+}
+
+function renderFreezerSearchResults(term){
+  const hits = [];
+  freezerData.freezers.forEach(fz=>{
+    fz.boards.forEach((board, idx)=>{
+      board.items.forEach(item=>{
+        if(item.name.toLowerCase().includes(term) || (item.note||'').toLowerCase().includes(term)){
+          hits.push({freezer:fz, board, letter: boardLetter(idx), item});
+        }
+      });
+    });
+  });
+  if(hits.length === 0) return `<div class="no-results">Nichts gefunden für „${escapeHtml(term)}"</div>`;
+  return `<div class="search-results">${hits.map(h=>{
+    const isEditing = editingFreezerItem && editingFreezerItem.freezerId===h.freezer.id && editingFreezerItem.boardId===h.board.id && editingFreezerItem.itemId===h.item.id;
+    if(isEditing) return renderFreezerItemForm(h.freezer, h.board, h.item);
+    return `
+    <div class="search-hit" data-freezer-search-hit="${h.freezer.id}:${h.board.id}:${h.item.id}" style="cursor:pointer;">
+      ${h.item.photo ? `<img class="item-thumb" src="${h.item.photo}" data-view-photo="${h.item.id}">` : `<div class="item-thumb-placeholder">🧊</div>`}
+      <div class="item-main">
+        <div class="item-name">${escapeHtml(h.item.name)}</div>
+        ${h.item.note ? `<div class="item-note">${escapeHtml(h.item.note)}</div>` : ''}
+      </div>
+      <span class="hit-loc-badge">${escapeHtml(h.freezer.name)} · ${h.letter}</span>
+      <div class="qty-stepper">
+        <button data-freezer-qty-dec="${h.freezer.id}:${h.board.id}:${h.item.id}">−</button>
+        <span class="qty-val">${h.item.qty}</span>
+        <button data-freezer-qty-inc="${h.freezer.id}:${h.board.id}:${h.item.id}">+</button>
+      </div>
+    </div>`;
+  }).join('')}</div>`;
+}
+
+function renderFreezerTab(){
+  if(freezerData.freezers.length === 0){
+    return `
+      <div class="empty-state"><div class="big">🧊</div><div class="msg">Noch keine Gefrierschränke angelegt.<br>Leg deinen ersten an.</div></div>
+      ${renderAddFreezer()}`;
+  }
+  return freezerData.freezers.map(fz => renderFreezerCard(fz)).join('') + renderAddFreezer();
+}
+
+function renderFreezerCard(freezer){
+  const isOpen = !!freezer._open;
+  const isEditingName = editingFreezerId === freezer.id;
+  const isConfirming = confirmDeleteId === ('freezer:' + freezer.id);
+  const totalItems = freezer.boards.reduce((a,b)=>a+b.items.length,0);
+  const nameHtml = isEditingName
+    ? `<input type="text" class="freezer-name-input" data-freezer="${freezer.id}" value="${escapeHtml(freezer.name)}">`
+    : `<span>${escapeHtml(freezer.name)}</span>`;
+
+  const lettered = freezer.boards.map((board, i) => ({ board, letter: boardLetter(i) }));
+  const displayBoards = [...lettered].reverse();
+  const boardsHtml = displayBoards.map(({board, letter}) => renderFreezerBoard(freezer, board, letter)).join('');
+
+  return `
+  <div class="shelf ${isOpen?'open':''}" data-freezer="${freezer.id}">
+    <div class="shelf-header" data-toggle-freezer="${freezer.id}">
+      <span class="shelf-tag-hole"></span>
+      <div class="shelf-name">${nameHtml}</div>
+      <span class="shelf-count">${totalItems}</span>
+      <div class="shelf-actions">
+        ${isEditingName
+          ? `<button class="icon-btn" data-save-freezer-name="${freezer.id}">✓</button>`
+          : `<button class="icon-btn" data-edit-freezer="${freezer.id}">✎</button>`}
+        <button class="icon-btn danger" data-del-freezer="${freezer.id}">🗑</button>
+      </div>
+      <span class="chevron">▸</span>
+    </div>
+    <div class="shelf-body">
+      ${isConfirming ? `
+        <div class="confirm-row">
+          Gefrierschrank "${escapeHtml(freezer.name)}" mit allen Fächern und Inhalten löschen?
+          <button class="confirm-yes" data-confirm-del-freezer="${freezer.id}">Löschen</button>
+          <button class="confirm-no" data-cancel-del>Abbrechen</button>
+        </div>` : ''}
+      ${freezer.boards.length > 0 ? `<div class="shelf-hint">Oberstes Fach zuerst · Fach A = unterstes Fach</div>` : ''}
+      ${boardsHtml}
+      ${freezer.boards.length === 0 ? `<div style="padding:6px 4px; color:var(--ink-soft); font-size:13px;">Noch keine Fächer in diesem Schrank.</div>` : ''}
+      <button class="add-shelf-trigger" data-add-freezer-board="${freezer.id}">+ Fach hinzufügen (oben drauf)</button>
+    </div>
+  </div>`;
+}
+
+function renderFreezerBoard(freezer, board, letter){
+  const isOpen = !!board._open;
+  const isConfirming = confirmDeleteId === ('freezerboard:' + freezer.id + ':' + board.id);
+  const isAdding = addingFreezerItemFor && addingFreezerItemFor.freezerId === freezer.id && addingFreezerItemFor.boardId === board.id;
+
+  const sortedItems = [...board.items].sort((a,b)=>a.name.localeCompare(b.name));
+
+  return `
+  <div class="board ${isOpen?'open':''}" data-board="${board.id}">
+    <div class="board-header" data-toggle-freezer-board="${freezer.id}:${board.id}">
+      <span class="board-badge">${letter}</span>
+      <span class="board-label">Fach ${letter}</span>
+      <span class="board-count">${board.items.length}</span>
+      <button class="icon-btn danger" data-del-freezer-board="${freezer.id}:${board.id}">🗑</button>
+      <span class="chevron">▸</span>
+    </div>
+    <div class="board-body">
+      ${isConfirming ? `
+        <div class="confirm-row">
+          Fach ${letter} mit allen Gegenständen löschen?
+          <button class="confirm-yes" data-confirm-del-freezer-board="${freezer.id}:${board.id}">Löschen</button>
+          <button class="confirm-no" data-cancel-del>Abbrechen</button>
+        </div>` : ''}
+      ${sortedItems.length === 0 ? `<div style="padding:4px 4px 6px; color:var(--ink-soft); font-size:12.5px;">Noch keine Gegenstände hier.</div>` : ''}
+      ${sortedItems.map(item => renderFreezerItem(freezer, board, item)).join('')}
+      ${isAdding ? renderFreezerItemForm(freezer, board, null) : `<button class="add-shelf-trigger" data-add-freezer-item-trigger="${freezer.id}:${board.id}">+ Gegenstand hinzufügen</button>`}
+    </div>
+  </div>`;
+}
+
+function renderFreezerItem(freezer, board, item){
+  const isEditing = editingFreezerItem && editingFreezerItem.freezerId===freezer.id && editingFreezerItem.boardId===board.id && editingFreezerItem.itemId===item.id;
+  if(isEditing) return renderFreezerItemForm(freezer, board, item);
+
+  const isConfirming = confirmDeleteId === ('freezeritem:' + freezer.id + ':' + board.id + ':' + item.id);
+  const low = Number(item.qty) <= 1;
+  const thumb = item.photo
+    ? `<img class="item-thumb" src="${item.photo}" data-view-photo="${item.id}">`
+    : `<div class="item-thumb-placeholder">🧊</div>`;
+
+  return `
+  <div class="item-row ${low?'qty-low':''}">
+    ${thumb}
+    <div class="item-main">
+      <div class="item-top-line">
+        <span class="item-name">${escapeHtml(item.name)}</span>
+      </div>
+      ${item.note ? `<div class="item-note">${escapeHtml(item.note)}</div>` : ''}
+      ${isConfirming ? `
+        <div class="confirm-row">
+          Löschen?
+          <button class="confirm-yes" data-confirm-del-freezer-item="${freezer.id}:${board.id}:${item.id}">Ja</button>
+          <button class="confirm-no" data-cancel-del>Nein</button>
+        </div>` : ''}
+    </div>
+    <div class="qty-stepper">
+      <button data-freezer-qty-dec="${freezer.id}:${board.id}:${item.id}">−</button>
+      <span class="qty-val">${item.qty}</span>
+      <button data-freezer-qty-inc="${freezer.id}:${board.id}:${item.id}">+</button>
+    </div>
+    <div class="item-actions">
+      <button class="icon-btn" data-edit-freezer-item="${freezer.id}:${board.id}:${item.id}">✎</button>
+      <button class="icon-btn danger" data-del-freezer-item="${freezer.id}:${board.id}:${item.id}">🗑</button>
+    </div>
+  </div>`;
+}
+
+function renderFreezerItemForm(freezer, board, item){
+  const isEdit = !!item;
+  const photoSrc = pendingPhoto !== null ? pendingPhoto : (isEdit ? item.photo : null);
+  return `
+  <div class="add-item-row edit-form" data-freezer-item-form="${freezer.id}:${board.id}:${isEdit?item.id:''}">
+    <input type="text" id="fzFormName" placeholder="Bezeichnung" value="${isEdit?escapeHtml(item.name):''}">
+    <input type="number" id="fzFormQty" placeholder="Anzahl" value="${isEdit ? item.qty : 1}" min="0">
+    <input type="text" id="fzFormNote" placeholder="Notiz (optional)" value="${isEdit?escapeHtml(item.note||''):''}">
+    <div class="photo-row">
+      <input type="file" accept="image/*" capture="environment" id="fzFormPhotoInput" style="display:none;">
+      <button type="button" class="photo-btn" id="fzFormPhotoTrigger">📷 ${photoSrc ? 'Foto ersetzen' : 'Foto aufnehmen'}</button>
+      ${photoSrc ? `<img src="${photoSrc}" style="width:34px;height:34px;border-radius:7px;object-fit:cover;border:1px solid var(--border);">` : ''}
+      ${photoSrc ? `<button type="button" class="photo-remove" id="fzFormPhotoRemove">entfernen</button>` : ''}
+    </div>
+    <div class="edit-actions">
+      <button class="btn-save" id="fzFormSave">${isEdit?'Speichern':'Hinzufügen'}</button>
+      <button class="btn-cancel" id="fzFormCancel">Abbrechen</button>
+    </div>
+  </div>`;
+}
+
+function renderAddFreezer(){
+  if(!addingFreezer) return `<button class="add-shelf-trigger top-level" id="addFreezerTrigger">+ Neuen Gefrierschrank anlegen</button>`;
+  return `
+    <div class="add-shelf-card">
+      <div class="add-shelf-form">
+        <label>Name des Gefrierschranks</label>
+        <input type="text" id="newFreezerName" placeholder="z.B. Gefrierschrank Keller">
+        <label>Anzahl Fächer (optional, kann später ergänzt werden)</label>
+        <input type="number" id="newFreezerBoards" placeholder="z.B. 3" min="0">
+        <button id="confirmAddFreezer">Anlegen</button>
+      </div>
+    </div>`;
+}
+
+function attachFreezerHandlers(){
+  document.querySelectorAll('[data-freezer-search-hit]').forEach(el=>el.addEventListener('click', (e)=>{
+    if(e.target.closest('.qty-stepper')) return;
+    const [fid,bid,iid] = el.getAttribute('data-freezer-search-hit').split(':');
+    editingFreezerItem = {freezerId:fid, boardId:bid, itemId:iid};
+    pendingPhoto = null;
+    render();
+  }));
+
+  document.querySelectorAll('[data-toggle-freezer]').forEach(el=>el.addEventListener('click', (e)=>{
+    if(e.target.closest('.shelf-actions') || e.target.closest('input')) return;
+    const fz = freezerData.freezers.find(f=>f.id===el.getAttribute('data-toggle-freezer'));
+    fz._open = !fz._open; render();
+  }));
+  document.querySelectorAll('[data-toggle-freezer-board]').forEach(el=>el.addEventListener('click', (e)=>{
+    if(e.target.closest('.icon-btn')) return;
+    const [fid,bid] = el.getAttribute('data-toggle-freezer-board').split(':');
+    const fz = freezerData.freezers.find(f=>f.id===fid);
+    const board = fz.boards.find(b=>b.id===bid);
+    board._open = !board._open; render();
+  }));
+
+  document.querySelectorAll('[data-edit-freezer]').forEach(el=>el.addEventListener('click', ()=>{
+    editingFreezerId = el.getAttribute('data-edit-freezer'); render();
+    const inp = document.querySelector('.freezer-name-input'); if(inp){inp.focus(); inp.select();}
+  }));
+  document.querySelectorAll('[data-save-freezer-name]').forEach(el=>el.addEventListener('click', ()=>{
+    const id = el.getAttribute('data-save-freezer-name');
+    const inp = document.querySelector(`.freezer-name-input[data-freezer="${id}"]`);
+    const fz = freezerData.freezers.find(f=>f.id===id);
+    if(inp && inp.value.trim()) fz.name = inp.value.trim();
+    editingFreezerId = null; queueSaveFreezer(); render();
+  }));
+  document.querySelectorAll('.freezer-name-input').forEach(el=>{
+    el.addEventListener('click', e=>e.stopPropagation());
+    el.addEventListener('keydown', e=>{ if(e.key==='Enter') document.querySelector('[data-save-freezer-name]').click(); });
+  });
+
+  document.querySelectorAll('[data-del-freezer]').forEach(el=>el.addEventListener('click', ()=>{
+    confirmDeleteId = 'freezer:' + el.getAttribute('data-del-freezer');
+    freezerData.freezers.find(f=>f.id===el.getAttribute('data-del-freezer'))._open = true;
+    render();
+  }));
+  document.querySelectorAll('[data-confirm-del-freezer]').forEach(el=>el.addEventListener('click', ()=>{
+    freezerData.freezers = freezerData.freezers.filter(f=>f.id!==el.getAttribute('data-confirm-del-freezer'));
+    confirmDeleteId = null; queueSaveFreezer(); showToastMsg('Gefrierschrank gelöscht'); render();
+  }));
+
+  document.querySelectorAll('[data-add-freezer-board]').forEach(el=>el.addEventListener('click', ()=>{
+    const fz = freezerData.freezers.find(f=>f.id===el.getAttribute('data-add-freezer-board'));
+    fz.boards.push({id:uid(), items:[], _open:true});
+    queueSaveFreezer(); render();
+  }));
+  document.querySelectorAll('[data-del-freezer-board]').forEach(el=>el.addEventListener('click', ()=>{
+    const [fid,bid] = el.getAttribute('data-del-freezer-board').split(':');
+    confirmDeleteId = 'freezerboard:' + fid + ':' + bid;
+    freezerData.freezers.find(f=>f.id===fid).boards.find(b=>b.id===bid)._open = true;
+    render();
+  }));
+  document.querySelectorAll('[data-confirm-del-freezer-board]').forEach(el=>el.addEventListener('click', ()=>{
+    const [fid,bid] = el.getAttribute('data-confirm-del-freezer-board').split(':');
+    const fz = freezerData.freezers.find(f=>f.id===fid);
+    fz.boards = fz.boards.filter(b=>b.id!==bid);
+    confirmDeleteId = null; queueSaveFreezer(); showToastMsg('Fach gelöscht'); render();
+  }));
+
+  document.querySelectorAll('[data-cancel-del]').forEach(el=>el.addEventListener('click', ()=>{ confirmDeleteId = null; render(); }));
+
+  document.querySelectorAll('[data-freezer-qty-inc]').forEach(el=>el.addEventListener('click', ()=>{
+    const [fid,bid,iid] = el.getAttribute('data-freezer-qty-inc').split(':');
+    const item = freezerData.freezers.find(f=>f.id===fid).boards.find(b=>b.id===bid).items.find(i=>i.id===iid);
+    item.qty = (Number(item.qty)||0)+1; queueSaveFreezer(); render();
+  }));
+  document.querySelectorAll('[data-freezer-qty-dec]').forEach(el=>el.addEventListener('click', ()=>{
+    const [fid,bid,iid] = el.getAttribute('data-freezer-qty-dec').split(':');
+    const item = freezerData.freezers.find(f=>f.id===fid).boards.find(b=>b.id===bid).items.find(i=>i.id===iid);
+    item.qty = Math.max(0,(Number(item.qty)||0)-1); queueSaveFreezer(); render();
+  }));
+
+  document.querySelectorAll('[data-edit-freezer-item]').forEach(el=>el.addEventListener('click', ()=>{
+    const [fid,bid,iid] = el.getAttribute('data-edit-freezer-item').split(':');
+    editingFreezerItem = {freezerId:fid, boardId:bid, itemId:iid};
+    pendingPhoto = null; render();
+    const inp = document.getElementById('fzFormName'); if(inp) inp.focus();
+  }));
+  document.querySelectorAll('[data-del-freezer-item]').forEach(el=>el.addEventListener('click', ()=>{
+    confirmDeleteId = 'freezeritem:' + el.getAttribute('data-del-freezer-item'); render();
+  }));
+  document.querySelectorAll('[data-confirm-del-freezer-item]').forEach(el=>el.addEventListener('click', ()=>{
+    const [fid,bid,iid] = el.getAttribute('data-confirm-del-freezer-item').split(':');
+    const board = freezerData.freezers.find(f=>f.id===fid).boards.find(b=>b.id===bid);
+    board.items = board.items.filter(i=>i.id!==iid);
+    confirmDeleteId = null; queueSaveFreezer(); showToastMsg('Gegenstand gelöscht'); render();
+  }));
+
+  document.querySelectorAll('[data-add-freezer-item-trigger]').forEach(el=>el.addEventListener('click', ()=>{
+    const [fid,bid] = el.getAttribute('data-add-freezer-item-trigger').split(':');
+    addingFreezerItemFor = {freezerId:fid, boardId:bid};
+    pendingPhoto = null; render();
+    const inp = document.getElementById('fzFormName'); if(inp) inp.focus();
+  }));
+
+  document.querySelectorAll('[data-view-photo]').forEach(el=>el.addEventListener('click', ()=>showPhotoOverlay(el.getAttribute('src'))));
+
+  const fzForm = document.querySelector('[data-freezer-item-form]');
+  if(fzForm){
+    const [fid, bid, iid] = fzForm.getAttribute('data-freezer-item-form').split(':');
+    const photoTrigger = document.getElementById('fzFormPhotoTrigger');
+    const photoInput = document.getElementById('fzFormPhotoInput');
+    const photoRemove = document.getElementById('fzFormPhotoRemove');
+    if(photoTrigger) photoTrigger.addEventListener('click', ()=>photoInput.click());
+    if(photoInput) photoInput.addEventListener('change', async ()=>{
+      const file = photoInput.files[0];
+      if(!file) return;
+      showToastMsg('Foto wird verarbeitet …');
+      try{ pendingPhoto = await resizeImageFile(file, 640, 0.65); render(); }
+      catch(e){ showToastMsg('Foto konnte nicht geladen werden'); }
+    });
+    if(photoRemove) photoRemove.addEventListener('click', ()=>{ pendingPhoto = ''; render(); });
+
+    document.getElementById('fzFormCancel').addEventListener('click', ()=>{
+      editingFreezerItem = null; addingFreezerItemFor = null; pendingPhoto = null; render();
+    });
+    document.getElementById('fzFormSave').addEventListener('click', ()=>{
+      const name = document.getElementById('fzFormName').value.trim();
+      const qty = Number(document.getElementById('fzFormQty').value) || 0;
+      const note = document.getElementById('fzFormNote').value.trim();
+      if(!name){ showToastMsg('Bitte eine Bezeichnung eingeben'); return; }
+
+      let finalPhoto;
+      if(pendingPhoto === null){ finalPhoto = iid ? freezerData.freezers.find(f=>f.id===fid).boards.find(b=>b.id===bid).items.find(i=>i.id===iid).photo || null : null; }
+      else if(pendingPhoto === ''){ finalPhoto = null; }
+      else { finalPhoto = pendingPhoto; }
+
+      const board = freezerData.freezers.find(f=>f.id===fid).boards.find(b=>b.id===bid);
+      if(iid){
+        const item = board.items.find(i=>i.id===iid);
+        item.name = name; item.qty = qty; item.note = note; item.photo = finalPhoto;
+      } else {
+        board.items.push({id:uid(), name, qty, note, photo: finalPhoto});
+      }
+      editingFreezerItem = null; addingFreezerItemFor = null; pendingPhoto = null;
+      queueSaveFreezer(); render();
+    });
+    ['fzFormName','fzFormQty','fzFormNote'].forEach(id=>{
+      const el = document.getElementById(id);
+      if(el) el.addEventListener('keydown', e=>{ if(e.key==='Enter') document.getElementById('fzFormSave').click(); });
+    });
+  }
+
+  const addTrigger = document.getElementById('addFreezerTrigger');
+  if(addTrigger) addTrigger.addEventListener('click', ()=>{
+    addingFreezer = true; render();
+    const inp = document.getElementById('newFreezerName'); if(inp) inp.focus();
+  });
+  const confirmAddFreezerBtn = document.getElementById('confirmAddFreezer');
+  if(confirmAddFreezerBtn){
+    confirmAddFreezerBtn.addEventListener('click', ()=>{
+      const name = document.getElementById('newFreezerName').value.trim();
+      const boardCount = Number(document.getElementById('newFreezerBoards').value) || 0;
+      if(!name){ showToastMsg('Bitte einen Namen eingeben'); return; }
+      const boards = [];
+      for(let i=0;i<boardCount;i++) boards.push({id:uid(), items:[], _open:false});
+      if(boards.length) boards[0]._open = true;
+      freezerData.freezers.push({id:uid(), name, boards, _open:true});
+      addingFreezer = false;
+      queueSaveFreezer(); render();
+    });
+    document.getElementById('newFreezerName').addEventListener('keydown', e=>{ if(e.key==='Enter') confirmAddFreezerBtn.click(); });
+    document.getElementById('newFreezerBoards').addEventListener('keydown', e=>{ if(e.key==='Enter') confirmAddFreezerBtn.click(); });
+  }
+}
+
 // ---------- Barcode scanner ----------
 
-function findItemByBarcode(code){
-  for(const shelf of data.shelves){
-    for(const board of shelf.boards){
+function findItemByBarcode(code, target){
+  const containers = target === 'gefrier' ? freezerData.freezers : data.shelves;
+  for(const container of containers){
+    for(const board of container.boards){
       for(const item of board.items){
-        if(item.barcode && item.barcode === code) return {shelf, board, item};
+        if(item.barcode && item.barcode === code) return {container, board, item};
       }
     }
   }
   return null;
 }
 
-function boardOptionsForShelf(shelf){
+function boardOptionsForShelf(shelf, unitLabel){
+  const label = unitLabel || 'Brett';
   const realBoards = shelf.boards.filter(b=>!b.floor);
-  const opts = realBoards.map((b,i)=>({id:b.id, label:'Brett ' + boardLetter(i)}));
+  const opts = realBoards.map((b,i)=>({id:b.id, label:label + ' ' + boardLetter(i)}));
   shelf.boards.filter(b=>b.floor).forEach(b=>opts.push({id:b.id, label:'Boden'}));
   return opts;
 }
 
-function openBarcodeScanner(){
+function openBarcodeScanner(target){
+  scanTarget = target || 'inventar';
   pendingBarcodePhoto = null;
   scanMode = 'add';
   lastScan = {code:null, time:0};
@@ -1004,9 +1455,10 @@ function renderCameraConsent(){
 
 async function startCameraAndDetection(){
   const card = document.getElementById('scanCard');
+  const targetLabel = scanTarget === 'gefrier' ? 'Gefrierschrank' : 'Abstellkammer';
   card.innerHTML = `
     <button class="scan-close" id="scanCloseBtn">✕</button>
-    <div class="lock-title" style="margin-bottom:8px;">Barcode scannen</div>
+    <div class="lock-title" style="margin-bottom:8px;">Barcode scannen – ${targetLabel}</div>
     ${scanModeToggleHtml()}
     <div class="scan-video-wrap"><video id="scanVideo" autoplay playsinline muted></video></div>
     <div class="scan-status" id="scanStatus">Kamera wird gestartet …</div>
@@ -1085,9 +1537,10 @@ function attachScanModeToggleHandlers(){
 
 function showManualBarcodeEntry(msg){
   const card = document.getElementById('scanCard');
+  const targetLabel = scanTarget === 'gefrier' ? 'Gefrierschrank' : 'Abstellkammer';
   card.innerHTML = `
     <button class="scan-close" id="scanCloseBtn">✕</button>
-    <div class="lock-title" style="margin-bottom:8px;">Barcode eingeben</div>
+    <div class="lock-title" style="margin-bottom:8px;">Barcode eingeben – ${targetLabel}</div>
     ${scanModeToggleHtml()}
     <div class="scan-status">${escapeHtml(msg)}</div>
     <div class="scan-form">
@@ -1127,12 +1580,13 @@ function afterQuickScanFeedback(msg){
 }
 
 function handleBarcodeDetected(code){
-  const match = findItemByBarcode(code);
+  const match = findItemByBarcode(code, scanTarget);
+  const save = scanTarget === 'gefrier' ? queueSaveFreezer : queueSave;
 
   if(scanMode === 'remove'){
     if(match){
       match.item.qty = Math.max(0, (Number(match.item.qty)||0) - 1);
-      queueSave();
+      save();
       showToastMsg(`${match.item.name}: Menge auf ${match.item.qty} verringert`);
       afterQuickScanFeedback(`✅ ${match.item.name} entnommen (jetzt ${match.item.qty}) – nächsten Barcode scannen …`);
     } else {
@@ -1145,7 +1599,7 @@ function handleBarcodeDetected(code){
   // add mode
   if(match){
     match.item.qty = (Number(match.item.qty)||0) + 1;
-    queueSave();
+    save();
     showToastMsg(`${match.item.name}: Menge auf ${match.item.qty} erhöht`);
     afterQuickScanFeedback(`✅ ${match.item.name} hinzugefügt (jetzt ${match.item.qty}) – nächsten Barcode scannen …`);
     return;
@@ -1172,12 +1626,17 @@ async function lookupOpenFoodFacts(code){
 }
 
 async function showNewBarcodeItemForm(code){
-  if(data.shelves.length === 0){
+  const isFreezer = scanTarget === 'gefrier';
+  const containers = isFreezer ? freezerData.freezers : data.shelves;
+  const containerLabel = isFreezer ? 'Gefrierschrank' : 'Regal';
+  const boardLabel = isFreezer ? 'Fach' : 'Brett / Boden';
+
+  if(containers.length === 0){
     const card = document.getElementById('scanCard');
     card.innerHTML = `
       <button class="scan-close" id="scanCloseBtn">✕</button>
       <div class="lock-title" style="margin-bottom:8px;">Neues Produkt</div>
-      <div class="scan-status">Es gibt noch kein Regal. Lege zuerst ein Regal an, bevor du Produkte scannst.</div>
+      <div class="scan-status">Es gibt noch ${isFreezer ? 'keinen Gefrierschrank' : 'kein Regal'}. Lege zuerst ${isFreezer ? 'einen Gefrierschrank' : 'ein Regal'} an, bevor du Produkte scannst.</div>
     `;
     document.getElementById('scanCloseBtn').addEventListener('click', closeScanner);
     return;
@@ -1195,29 +1654,30 @@ async function showNewBarcodeItemForm(code){
   pendingBarcodePhoto = (offResult && offResult.photo) ? offResult.photo : null;
   const prefillName = (offResult && offResult.name) ? offResult.name : '';
 
-  const renderForm = (shelfId)=>{
-    const shelf = data.shelves.find(s=>s.id===shelfId) || data.shelves[0];
-    const boardOpts = boardOptionsForShelf(shelf);
+  const renderForm = (containerId)=>{
+    const container = containers.find(s=>s.id===containerId) || containers[0];
+    const boardOpts = boardOptionsForShelf(container, isFreezer ? 'Fach' : 'Brett');
     const photoPreviewHtml = pendingBarcodePhoto
       ? `<img src="${pendingBarcodePhoto}" style="width:34px;height:34px;border-radius:7px;object-fit:cover;border:1px solid var(--border);vertical-align:middle;margin-left:6px;">`
       : '';
     card.innerHTML = `
       <button class="scan-close" id="scanCloseBtn">✕</button>
-      <div class="lock-title" style="margin-bottom:4px;">Neues Produkt</div>
+      <div class="lock-title" style="margin-bottom:4px;">Neues Produkt${isFreezer ? ' (Gefrierschrank)' : ''}</div>
       <div class="scan-status">Barcode: ${escapeHtml(code)} – noch nicht im Bestand.${offResult ? ' Daten aus der Lebensmittel-Datenbank übernommen (kannst du anpassen).' : ''}</div>
       <div class="scan-form">
         <label>Bezeichnung</label>
         <input type="text" id="scanItemName" placeholder="Produktname" value="${escapeHtml(prefillName)}">
-        <label>Regal</label>
+        <label>${containerLabel}</label>
         <select id="scanShelfSelect">
-          ${data.shelves.map(s=>`<option value="${s.id}" ${s.id===shelf.id?'selected':''}>${escapeHtml(s.name)}</option>`).join('')}
+          ${containers.map(s=>`<option value="${s.id}" ${s.id===container.id?'selected':''}>${escapeHtml(s.name)}</option>`).join('')}
         </select>
-        <label>Brett / Boden</label>
+        <label>${boardLabel}</label>
         <select id="scanBoardSelect">
-          ${boardOpts.length===0 ? `<option value="">Kein Brett vorhanden</option>` : boardOpts.map(o=>`<option value="${o.id}">${o.label}</option>`).join('')}
+          ${boardOpts.length===0 ? `<option value="">Kein ${isFreezer?'Fach':'Brett'} vorhanden</option>` : boardOpts.map(o=>`<option value="${o.id}">${o.label}</option>`).join('')}
         </select>
+        ${isFreezer ? '' : `
         <label>Reihe (optional)</label>
-        <input type="number" id="scanReihe" placeholder="z.B. 2">
+        <input type="number" id="scanReihe" placeholder="z.B. 2">`}
         <label>Menge</label>
         <input type="number" id="scanQty" value="1" min="0">
         <label>Foto</label>
@@ -1242,27 +1702,28 @@ async function showNewBarcodeItemForm(code){
     document.getElementById('scanSaveBtn').addEventListener('click', ()=>{
       const name = document.getElementById('scanItemName').value.trim();
       const boardId = document.getElementById('scanBoardSelect').value;
-      const reiheRaw = document.getElementById('scanReihe').value;
+      const reiheRaw = isFreezer ? '' : document.getElementById('scanReihe').value;
       const qty = Number(document.getElementById('scanQty').value) || 0;
       if(!name){ showToastMsg('Bitte eine Bezeichnung eingeben'); return; }
-      if(!boardId){ showToastMsg('Bitte zuerst ein Brett anlegen'); return; }
-      const targetShelf = data.shelves.find(s=>s.id===document.getElementById('scanShelfSelect').value);
-      const board = targetShelf.boards.find(b=>b.id===boardId);
-      board.items.push({
+      if(!boardId){ showToastMsg(`Bitte zuerst ein ${isFreezer?'Fach':'Brett'} anlegen`); return; }
+      const targetContainer = containers.find(s=>s.id===document.getElementById('scanShelfSelect').value);
+      const board = targetContainer.boards.find(b=>b.id===boardId);
+      const newItem = {
         id:uid(), name, qty,
-        note:'', reihe: reiheRaw==='' ? null : Number(reiheRaw),
-        photo: pendingBarcodePhoto || null,
-        barcode: code
-      });
-      queueSave();
+        note:'', photo: pendingBarcodePhoto || null, barcode: code
+      };
+      if(!isFreezer) newItem.reihe = reiheRaw==='' ? null : Number(reiheRaw);
+      board.items.push(newItem);
+      if(isFreezer) queueSaveFreezer(); else queueSave();
       showToastMsg('Produkt hinzugefügt');
       closeScanner();
-      targetShelf._open = true; board._open = true;
-      if(activeTab !== 'inventar'){ activeTab='inventar'; document.getElementById('tabInventar').classList.add('active'); document.getElementById('tabRezepte').classList.remove('active'); }
+      targetContainer._open = true; board._open = true;
+      const targetTab = isFreezer ? 'gefrier' : 'inventar';
+      if(activeTab !== targetTab){ activeTab = targetTab; setActiveTabButton(targetTab); }
       render();
     });
   };
-  renderForm(data.shelves[0].id);
+  renderForm(containers[0].id);
 }
 
 // ---------- Handlers ----------
@@ -1602,20 +2063,25 @@ function attachRecipeHandlers(){
 }
 
 document.getElementById('searchInput').addEventListener('input', render);
+document.getElementById('freezerSearchInput').addEventListener('input', render);
 
-document.getElementById('scanBarcodeBtn').addEventListener('click', openBarcodeScanner);
+document.getElementById('scanBarcodeBtn').addEventListener('click', ()=>openBarcodeScanner('inventar'));
+document.getElementById('scanBarcodeBtnFreezer').addEventListener('click', ()=>openBarcodeScanner('gefrier'));
+
+function setActiveTabButton(tab){
+  document.getElementById('tabInventar').classList.toggle('active', tab==='inventar');
+  document.getElementById('tabRezepte').classList.toggle('active', tab==='rezepte');
+  document.getElementById('tabGefrier').classList.toggle('active', tab==='gefrier');
+}
 
 document.getElementById('tabInventar').addEventListener('click', ()=>{
-  activeTab = 'inventar';
-  document.getElementById('tabInventar').classList.add('active');
-  document.getElementById('tabRezepte').classList.remove('active');
-  render();
+  activeTab = 'inventar'; setActiveTabButton('inventar'); render();
 });
 document.getElementById('tabRezepte').addEventListener('click', ()=>{
-  activeTab = 'rezepte';
-  document.getElementById('tabRezepte').classList.add('active');
-  document.getElementById('tabInventar').classList.remove('active');
-  render();
+  activeTab = 'rezepte'; setActiveTabButton('rezepte'); render();
+});
+document.getElementById('tabGefrier').addEventListener('click', ()=>{
+  activeTab = 'gefrier'; setActiveTabButton('gefrier'); render();
 });
 
 document.getElementById('logoutTrigger').addEventListener('click', async ()=>{
