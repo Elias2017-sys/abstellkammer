@@ -598,6 +598,8 @@ function render(){
 
   if(term.length > 0){
     main.innerHTML = renderSearchResults(term);
+    attachAllHandlers();
+    attachSearchJumpHandlers();
     renderStatus();
     return;
   }
@@ -820,17 +822,47 @@ function renderSearchResults(term){
     });
   });
   if(hits.length === 0) return `<div class="no-results">Nichts gefunden für „${escapeHtml(term)}"</div>`;
-  return `<div class="search-results">${hits.map(h=>`
-    <div class="search-hit">
+  return `<div class="search-results">${hits.map(h=>{
+    const isEditing = editingItem && editingItem.shelfId===h.shelf.id && editingItem.boardId===h.board.id && editingItem.itemId===h.item.id;
+    if(isEditing) return renderItemForm(h.shelf, h.board, h.item);
+    return `
+    <div class="search-hit" data-search-hit="${h.shelf.id}:${h.board.id}:${h.item.id}" style="cursor:pointer;">
       ${h.item.photo ? `<img class="item-thumb" src="${h.item.photo}" data-view-photo-search="${h.item.id}">` : `<div class="item-thumb-placeholder">📦</div>`}
       <div class="item-main">
         <div class="item-name">${escapeHtml(h.item.name)}</div>
         ${h.item.note ? `<div class="item-note">${escapeHtml(h.item.note)}</div>` : ''}
       </div>
-      <span class="hit-loc-badge">${escapeHtml(h.shelf.name)} · ${h.letter}${h.item.reihe!=null && h.item.reihe!=='' ? ('/'+escapeHtml(String(h.item.reihe))) : ''}</span>
-      <span class="qty-val">${h.item.qty}×</span>
-    </div>`).join('')}
-  </div>`;
+      <span class="hit-loc-badge" data-jump-to-shelf="${h.shelf.id}:${h.board.id}" style="cursor:pointer;">${escapeHtml(h.shelf.name)} · ${h.letter}${h.item.reihe!=null && h.item.reihe!=='' ? ('/'+escapeHtml(String(h.item.reihe))) : ''} ↗</span>
+      <div class="qty-stepper">
+        <button data-qty-dec="${h.shelf.id}:${h.board.id}:${h.item.id}">−</button>
+        <span class="qty-val">${h.item.qty}</span>
+        <button data-qty-inc="${h.shelf.id}:${h.board.id}:${h.item.id}">+</button>
+      </div>
+    </div>`;
+  }).join('')}</div>`;
+}
+
+function attachSearchJumpHandlers(){
+  document.querySelectorAll('[data-search-hit]').forEach(el=>el.addEventListener('click', (e)=>{
+    if(e.target.closest('.qty-stepper') || e.target.closest('[data-jump-to-shelf]')) return;
+    const [sid,bid,iid] = el.getAttribute('data-search-hit').split(':');
+    editingItem = {shelfId:sid, boardId:bid, itemId:iid};
+    pendingPhoto = null;
+    render();
+  }));
+  document.querySelectorAll('[data-jump-to-shelf]').forEach(el=>el.addEventListener('click', (e)=>{
+    e.stopPropagation();
+    const [sid,bid] = el.getAttribute('data-jump-to-shelf').split(':');
+    const shelf = data.shelves.find(s=>s.id===sid);
+    const board = shelf.boards.find(b=>b.id===bid);
+    shelf._open = true; board._open = true;
+    document.getElementById('searchInput').value = '';
+    render();
+    setTimeout(()=>{
+      const el2 = document.querySelector(`[data-shelf="${sid}"]`);
+      if(el2) el2.scrollIntoView({behavior:'smooth', block:'start'});
+    }, 50);
+  }));
 }
 
 // ---------- Recipes: matching against inventory ----------
