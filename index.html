@@ -278,8 +278,8 @@ main{padding:8px 4px 0;}
 
 <script type="module">
 import { initializeApp } from "https://www.gstatic.com/firebasejs/10.13.2/firebase-app.js";
-import { getFirestore, doc, getDoc, setDoc, collection, getDocs } from "https://www.gstatic.com/firebasejs/10.13.2/firebase-firestore.js";
-import { getAuth, onAuthStateChanged, signInWithEmailAndPassword, signOut, sendPasswordResetEmail } from "https://www.gstatic.com/firebasejs/10.13.2/firebase-auth.js";
+import { getFirestore, doc, getDoc, setDoc, updateDoc, collection, getDocs, arrayUnion } from "https://www.gstatic.com/firebasejs/10.13.2/firebase-firestore.js";
+import { getAuth, onAuthStateChanged, createUserWithEmailAndPassword, signInWithEmailAndPassword, signOut, sendPasswordResetEmail } from "https://www.gstatic.com/firebasejs/10.13.2/firebase-auth.js";
 
 const firebaseConfig = {
   apiKey: "AIzaSyB-uO98tICNd67KtVtxYQi_7npE8f7Zj6Y",
@@ -293,29 +293,33 @@ const fbApp = initializeApp(firebaseConfig);
 const db = getFirestore(fbApp);
 const auth = getAuth(fbApp);
 
-// Kleine Helfer für den Zugriff auf einzelne Dokumente in der Sammlung "abstellkammer"
+let familyId = null; // wird nach dem Login gesetzt (eigene Familie/Zugangscode)
+
+function familyDocRef(name){ return doc(db, 'families', familyId, 'state', name); }
+
+// Kleine Helfer für den Zugriff auf einzelne Dokumente innerhalb der eigenen Familie
 async function fsGetDoc(name){
   try{
-    const snap = await getDoc(doc(db, 'abstellkammer', name));
+    const snap = await getDoc(familyDocRef(name));
     return snap.exists() ? snap.data() : null;
   } catch(e){ console.error('Firestore get error', e); return null; }
 }
 async function fsSetDoc(name, value){
-  try{ await setDoc(doc(db, 'abstellkammer', name), value); return true; }
+  try{ await setDoc(familyDocRef(name), value); return true; }
   catch(e){ console.error('Firestore set error', e); return false; }
 }
-// Fotos leben in einer eigenen Sammlung, damit das Haupt-Inventar-Dokument klein bleibt
+// Fotos leben in einer eigenen Sammlung (pro Familie), damit das Haupt-Inventar-Dokument klein bleibt
 // (Firestore-Dokumente sind auf ca. 1 MB begrenzt).
 async function fsGetAllPhotos(){
   const map = {};
   try{
-    const snap = await getDocs(collection(db, 'photos'));
+    const snap = await getDocs(collection(db, 'families', familyId, 'photos'));
     snap.forEach(d=>{ map[d.id] = d.data().photo || null; });
   } catch(e){ console.error('Firestore photos read error', e); }
   return map;
 }
 async function fsSetPhoto(itemId, photo){
-  try{ await setDoc(doc(db, 'photos', itemId), { photo: photo || null }); }
+  try{ await setDoc(doc(db, 'families', familyId, 'photos', itemId), { photo: photo || null }); }
   catch(e){ console.error('Firestore photo write error', e); }
 }
 
@@ -486,17 +490,25 @@ async function saveRecipesData(showToast){
 function queueSaveRecipes(){ clearTimeout(saveTimerRecipes); saveTimerRecipes = setTimeout(()=>saveRecipesData(false), 400); }
 function showToastMsg(msg){ const t = document.getElementById('toast'); t.textContent = msg; t.classList.add('show'); setTimeout(()=>t.classList.remove('show'), 1600); }
 
-// ---------- Login (Firebase Authentication) ----------
+// ---------- Login (Firebase Authentication) + Familien-Zugehörigkeit ----------
 
 let currentUser = null;
 
+function randomFamilyCode(){
+  const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789'; // ohne verwechselbare Zeichen (0/O, 1/I)
+  let code = '';
+  for(let i=0;i<8;i++) code += chars[Math.floor(Math.random()*chars.length)];
+  return code;
+}
+
 function initLock(){
-  onAuthStateChanged(auth, (user)=>{
+  onAuthStateChanged(auth, async (user)=>{
     if(user){
       currentUser = user.email;
-      enterApp();
+      await checkFamilyMembership(user.uid);
     } else {
       currentUser = null;
+      familyId = null;
       document.getElementById('lockScreen').style.display = 'flex';
       document.getElementById('appContent').style.display = 'none';
       document.getElementById('logoutTrigger').style.display = 'none';
@@ -505,17 +517,32 @@ function initLock(){
   });
 }
 
+async function checkFamilyMembership(uid){
+  try{
+    const snap = await getDoc(doc(db, 'users', uid));
+    if(snap.exists() && snap.data().familyId){
+      familyId = snap.data().familyId;
+      enterApp();
+    } else {
+      renderFamilyChoice();
+    }
+  } catch(e){
+    console.error('Familien-Check fehlgeschlagen', e);
+    renderFamilyChoice();
+  }
+}
+
 function renderLoginForm(){
   document.getElementById('lockCard').innerHTML = `
     <div class="lock-icon">📦</div>
     <div class="lock-title">Abstellkammer</div>
-    <div class="lock-sub">Melde dich mit deinem Familien-Zugang an.</div>
+    <div class="lock-sub">Melde dich an oder erstelle einen neuen Zugang.</div>
     <input type="email" class="lock-input" id="loginEmail" placeholder="E-Mail" autocomplete="username" style="letter-spacing:normal; font-family:'Inter',sans-serif; font-size:15px;">
     <input type="password" class="lock-input" id="loginPassword" placeholder="Passwort" autocomplete="current-password" style="letter-spacing:normal; font-family:'Inter',sans-serif; font-size:15px;">
     <div class="lock-error" id="lockError"></div>
     <button class="lock-btn" id="loginBtn">Anmelden</button>
+    <button class="lock-btn" id="signupBtn" style="background:var(--surface-alt); color:var(--ink); margin-top:6px;">Neuen Zugang erstellen</button>
     <div class="lock-hint" id="forgotPwLink" style="cursor:pointer;">Passwort vergessen?</div>
-    <div class="lock-hint">Noch keinen Zugang? Wende dich an die Person, die die App eingerichtet hat.</div>
   `;
   const doLogin = async ()=>{
     const email = document.getElementById('loginEmail').value.trim();
@@ -525,7 +552,7 @@ function renderLoginForm(){
     if(!email || !password){ err.textContent = 'Bitte E-Mail und Passwort eingeben.'; return; }
     try{
       await signInWithEmailAndPassword(auth, email, password);
-      // onAuthStateChanged übernimmt den Rest (enterApp)
+      // onAuthStateChanged übernimmt den Rest
     } catch(e){
       if(e.code === 'auth/invalid-credential' || e.code === 'auth/wrong-password' || e.code === 'auth/user-not-found'){
         err.textContent = 'E-Mail oder Passwort falsch.';
@@ -536,7 +563,25 @@ function renderLoginForm(){
       }
     }
   };
+  const doSignup = async ()=>{
+    const email = document.getElementById('loginEmail').value.trim();
+    const password = document.getElementById('loginPassword').value;
+    const err = document.getElementById('lockError');
+    err.textContent = '';
+    if(!email || !password){ err.textContent = 'Bitte E-Mail und Passwort eingeben.'; return; }
+    if(password.length < 6){ err.textContent = 'Passwort braucht mindestens 6 Zeichen.'; return; }
+    try{
+      await createUserWithEmailAndPassword(auth, email, password);
+      // onAuthStateChanged übernimmt den Rest -> Familie erstellen/beitreten
+    } catch(e){
+      if(e.code === 'auth/email-already-in-use'){ err.textContent = 'Für diese E-Mail gibt es schon einen Zugang – bitte anmelden.'; }
+      else if(e.code === 'auth/invalid-email'){ err.textContent = 'Ungültige E-Mail-Adresse.'; }
+      else if(e.code === 'auth/weak-password'){ err.textContent = 'Passwort ist zu einfach.'; }
+      else { err.textContent = 'Registrierung fehlgeschlagen.'; }
+    }
+  };
   document.getElementById('loginBtn').addEventListener('click', doLogin);
+  document.getElementById('signupBtn').addEventListener('click', doSignup);
   document.getElementById('loginPassword').addEventListener('keydown', e=>{ if(e.key==='Enter') doLogin(); });
   document.getElementById('forgotPwLink').addEventListener('click', async ()=>{
     const email = document.getElementById('loginEmail').value.trim();
@@ -553,6 +598,111 @@ function renderLoginForm(){
   });
 }
 
+function renderFamilyChoice(){
+  document.getElementById('lockScreen').style.display = 'flex';
+  document.getElementById('appContent').style.display = 'none';
+  document.getElementById('lockCard').innerHTML = `
+    <div class="lock-icon">👪</div>
+    <div class="lock-title">Familie</div>
+    <div class="lock-sub">Erstelle eine neue Familie oder tritt einer bestehenden über den Code bei.</div>
+    <button class="lock-btn" id="createFamilyBtn">Neue Familie erstellen</button>
+    <button class="lock-btn" id="joinFamilyBtn" style="background:var(--surface-alt); color:var(--ink); margin-top:6px;">Familie beitreten (mit Code)</button>
+    <div class="lock-hint" id="logoutFromChoice" style="cursor:pointer;">Abmelden</div>
+  `;
+  document.getElementById('createFamilyBtn').addEventListener('click', renderCreateFamilyForm);
+  document.getElementById('joinFamilyBtn').addEventListener('click', renderJoinFamilyForm);
+  document.getElementById('logoutFromChoice').addEventListener('click', async ()=>{ await signOut(auth); });
+}
+
+function renderCreateFamilyForm(){
+  document.getElementById('lockCard').innerHTML = `
+    <div class="lock-icon">👪</div>
+    <div class="lock-title">Familie erstellen</div>
+    <div class="lock-sub">Gib ihr einen Namen. Danach bekommst du einen Code, den du an deine Familie weitergibst.</div>
+    <input type="text" class="lock-input" id="familyNameInput" placeholder="z.B. Familie Müller" style="letter-spacing:normal; font-family:'Inter',sans-serif; font-size:16px;">
+    <div class="lock-error" id="lockError"></div>
+    <button class="lock-btn" id="createFamilyConfirmBtn">Erstellen</button>
+    <div class="lock-hint" id="backToChoice2" style="cursor:pointer;">Zurück</div>
+  `;
+  document.getElementById('backToChoice2').addEventListener('click', renderFamilyChoice);
+  document.getElementById('createFamilyConfirmBtn').addEventListener('click', async ()=>{
+    const name = document.getElementById('familyNameInput').value.trim();
+    const err = document.getElementById('lockError');
+    if(!name){ err.textContent = 'Bitte einen Namen eingeben.'; return; }
+    const uid = auth.currentUser.uid;
+    const newCode = randomFamilyCode();
+    try{
+      await setDoc(doc(db, 'families', newCode), { name, members: [uid], createdAt: Date.now() });
+      await setDoc(doc(db, 'users', uid), { familyId: newCode });
+      familyId = newCode;
+      await tryMigrateLegacyData();
+      renderFamilyCreatedScreen(newCode);
+    } catch(e){
+      console.error(e);
+      err.textContent = 'Konnte Familie nicht erstellen, bitte nochmal versuchen.';
+    }
+  });
+}
+
+function renderFamilyCreatedScreen(code){
+  document.getElementById('lockCard').innerHTML = `
+    <div class="lock-icon">🎉</div>
+    <div class="lock-title">Familie erstellt!</div>
+    <div class="lock-sub">Gib diesen Code an deine Familie weiter, damit sie beitreten kann:</div>
+    <div style="font-family:'JetBrains Mono',monospace; font-size:26px; font-weight:700; letter-spacing:4px; text-align:center; background:var(--surface-alt); border-radius:10px; padding:14px; margin-bottom:14px;">${escapeHtml(code)}</div>
+    <button class="lock-btn" id="continueToAppBtn">Weiter zur App</button>
+  `;
+  document.getElementById('continueToAppBtn').addEventListener('click', enterApp);
+}
+
+function renderJoinFamilyForm(){
+  document.getElementById('lockCard').innerHTML = `
+    <div class="lock-icon">👪</div>
+    <div class="lock-title">Familie beitreten</div>
+    <div class="lock-sub">Gib den Code ein, den du von deiner Familie bekommen hast.</div>
+    <input type="text" class="lock-input" id="familyCodeInput" placeholder="CODE" maxlength="8" style="text-transform:uppercase;">
+    <div class="lock-error" id="lockError"></div>
+    <button class="lock-btn" id="joinFamilyConfirmBtn">Beitreten</button>
+    <div class="lock-hint" id="backToChoice3" style="cursor:pointer;">Zurück</div>
+  `;
+  document.getElementById('backToChoice3').addEventListener('click', renderFamilyChoice);
+  document.getElementById('joinFamilyConfirmBtn').addEventListener('click', async ()=>{
+    const code = document.getElementById('familyCodeInput').value.trim().toUpperCase();
+    const err = document.getElementById('lockError');
+    if(!code){ err.textContent = 'Bitte einen Code eingeben.'; return; }
+    const uid = auth.currentUser.uid;
+    try{
+      const famSnap = await getDoc(doc(db, 'families', code));
+      if(!famSnap.exists()){ err.textContent = 'Diesen Code gibt es nicht.'; return; }
+      await updateDoc(doc(db, 'families', code), { members: arrayUnion(uid) });
+      await setDoc(doc(db, 'users', uid), { familyId: code });
+      familyId = code;
+      enterApp();
+    } catch(e){
+      console.error(e);
+      err.textContent = 'Beitreten fehlgeschlagen, bitte nochmal versuchen.';
+    }
+  });
+}
+
+async function tryMigrateLegacyData(){
+  // Einmalige Übernahme der alten, noch nicht familienbezogenen Daten (falls vorhanden)
+  // in die neu erstellte Familie. Schlägt harmlos fehl, wenn nichts Altes existiert.
+  try{
+    const legacyNames = ['inventory','recipes','freezers','shoppinglist'];
+    for(const name of legacyNames){
+      const snap = await getDoc(doc(db, 'abstellkammer', name));
+      if(snap.exists()){
+        await setDoc(doc(db, 'families', familyId, 'state', name), snap.data());
+      }
+    }
+    const photosSnap = await getDocs(collection(db, 'photos'));
+    for(const d of photosSnap.docs){
+      await setDoc(doc(db, 'families', familyId, 'photos', d.id), d.data());
+    }
+  } catch(e){ console.error('Migration alter Daten fehlgeschlagen (kein Problem, falls es nichts Altes gab)', e); }
+}
+
 function renderGreeting(){
   let el = document.getElementById('greetingLine');
   if(!el){
@@ -563,7 +713,9 @@ function renderGreeting(){
     header.insertBefore(el, header.querySelector('#inventarHeaderExtra'));
   }
   const shortName = escapeHtml((currentUser||'').split('@')[0]);
-  el.innerHTML = `Hallo, ${shortName}`;
+  el.innerHTML = `Hallo, ${shortName} · Familien-Code: <span style="cursor:pointer; text-decoration:underline;" id="showFamilyCode">${escapeHtml(familyId)}</span>`;
+  const codeEl = document.getElementById('showFamilyCode');
+  if(codeEl) codeEl.addEventListener('click', ()=>showToastMsg(`Familien-Code: ${familyId}`));
 }
 
 function enterApp(){
@@ -824,6 +976,16 @@ function renderItem(shelf, board, item){
   </div>`;
 }
 
+function renderAutoShopCheckbox(idPrefix, currentValue){
+  const checked = currentValue !== false; // Standard: an
+  return `
+    <label style="display:flex; align-items:center; gap:6px; font-family:'Inter',sans-serif; font-size:13px; color:var(--ink); margin-top:8px;">
+      <input type="checkbox" id="${idPrefix}AutoShop" ${checked?'checked':''} style="width:auto;">
+      Automatisch auf Einkaufsliste setzen, wenn Bestand niedrig ist
+    </label>
+  `;
+}
+
 function renderItemForm(shelf, board, item){
   const isEdit = !!item;
   const photoSrc = pendingPhoto !== null ? pendingPhoto : (isEdit ? item.photo : null);
@@ -837,6 +999,7 @@ function renderItemForm(shelf, board, item){
       <label>Menge</label>
       <input type="number" id="formQty" placeholder="Anzahl" value="${isEdit ? item.qty : 1}" min="0">
       ${renderUnitsPerScanField('formUnits', isEdit ? item.unitsPerScan : 1, false, null)}
+      ${renderAutoShopCheckbox('formUnits', isEdit ? item.autoShop : true)}
       <label>Notiz (optional)</label>
       <input type="text" id="formNote" placeholder="z.B. läuft bald ab" value="${isEdit?escapeHtml(item.note||''):''}">
       <label>Foto</label>
@@ -1304,6 +1467,7 @@ function renderFreezerItemForm(freezer, board, item){
       <label>Menge</label>
       <input type="number" id="fzFormQty" placeholder="Anzahl" value="${isEdit ? item.qty : 1}" min="0">
       ${renderUnitsPerScanField('fzFormUnits', isEdit ? item.unitsPerScan : 1, false, null)}
+      ${renderAutoShopCheckbox('fzFormUnits', isEdit ? item.autoShop : true)}
       <label>Notiz (optional)</label>
       <input type="text" id="fzFormNote" placeholder="z.B. läuft bald ab" value="${isEdit?escapeHtml(item.note||''):''}">
       <label>Foto</label>
@@ -1462,6 +1626,7 @@ function attachFreezerHandlers(){
       const qty = Number(document.getElementById('fzFormQty').value) || 0;
       const note = document.getElementById('fzFormNote').value.trim();
       const unitsPerScan = Math.max(1, Number(document.getElementById('fzFormUnitsUnitsPerScan').value) || 1);
+      const autoShop = document.getElementById('fzFormUnitsAutoShop').checked;
       if(!name){ showToastMsg('Bitte eine Bezeichnung eingeben'); return; }
 
       let finalPhoto;
@@ -1472,9 +1637,9 @@ function attachFreezerHandlers(){
       const board = freezerData.freezers.find(f=>f.id===fid).boards.find(b=>b.id===bid);
       if(iid){
         const item = board.items.find(i=>i.id===iid);
-        item.name = name; item.qty = qty; item.note = note; item.photo = finalPhoto; item.unitsPerScan = unitsPerScan;
+        item.name = name; item.qty = qty; item.note = note; item.photo = finalPhoto; item.unitsPerScan = unitsPerScan; item.autoShop = autoShop;
       } else {
-        board.items.push({id:uid(), name, qty, note, photo: finalPhoto, unitsPerScan});
+        board.items.push({id:uid(), name, qty, note, photo: finalPhoto, unitsPerScan, autoShop});
       }
       editingFreezerItem = null; addingFreezerItemFor = null; pendingPhoto = null;
       queueSaveFreezer(); render();
@@ -1520,6 +1685,7 @@ function collectLowStockItems(){
       const letter = board.floor ? 'Boden' : boardLetter(realIdx);
       if(!board.floor) realIdx++;
       board.items.forEach(item=>{
+        if(item.autoShop === false) return;
         const qty = Number(item.qty)||0;
         if(qty <= threshold){
           results.push({ id:item.id, name:item.name, qty, location: `${shelf.name} · ${letter}` });
@@ -1532,6 +1698,7 @@ function collectLowStockItems(){
     fz.boards.forEach((board, idx)=>{
       const letter = boardLetter(idx);
       board.items.forEach(item=>{
+        if(item.autoShop === false) return;
         const qty = Number(item.qty)||0;
         if(qty <= threshold){
           results.push({ id:item.id, name:item.name, qty, location: `${fz.name} · Fach ${letter}` });
@@ -1655,22 +1822,7 @@ function openBarcodeScanner(target){
   scanMode = 'add';
   lastScan = {code:null, time:0};
   document.getElementById('scanOverlay').style.display = 'flex';
-  renderCameraConsent();
-}
-
-function renderCameraConsent(){
-  const card = document.getElementById('scanCard');
-  card.innerHTML = `
-    <button class="scan-close" id="scanCloseBtn">✕</button>
-    <div class="lock-icon">📷</div>
-    <div class="lock-title" style="margin-bottom:6px;">Kamera-Zugriff</div>
-    <div class="scan-status">Um Barcodes automatisch zu erkennen, muss der Browser auf deine Kamera zugreifen dürfen. Dein Handy fragt dich gleich danach.</div>
-    <button class="scan-save-btn" id="allowCameraBtn" style="margin-top:14px;">📷 Kamera erlauben</button>
-    <button class="add-shelf-trigger" id="skipCameraBtn" style="margin-top:4px;">Ohne Kamera – Nummer eingeben</button>
-  `;
-  document.getElementById('scanCloseBtn').addEventListener('click', closeScanner);
-  document.getElementById('allowCameraBtn').addEventListener('click', startCameraAndDetection);
-  document.getElementById('skipCameraBtn').addEventListener('click', ()=>showManualBarcodeEntry('Barcode-Nummer bitte eingeben:'));
+  startCameraAndDetection();
 }
 
 async function startCameraAndDetection(){
@@ -1961,6 +2113,7 @@ async function showNewBarcodeItemForm(code){
             : (offResult && offResult.likelyNetProduct) ? 'wird oft im Netz verkauft – Stückzahl eintragen'
             : null
         )}
+        ${renderAutoShopCheckbox('scanUnits', true)}
         <label>Foto</label>
         <input type="file" accept="image/*" capture="environment" id="scanPhotoInput" style="display:none;">
         <button type="button" class="photo-btn" id="scanPhotoTrigger" style="margin-top:4px;">📷 ${pendingBarcodePhoto?'Foto ersetzen':'Foto aufnehmen'}</button>
@@ -1987,13 +2140,14 @@ async function showNewBarcodeItemForm(code){
       const reiheRaw = isFreezer ? '' : document.getElementById('scanReihe').value;
       const qty = Number(document.getElementById('scanQty').value) || 0;
       const unitsPerScan = Math.max(1, Number(document.getElementById('scanUnitsUnitsPerScan').value) || 1);
+      const autoShop = document.getElementById('scanUnitsAutoShop').checked;
       if(!name){ showToastMsg('Bitte eine Bezeichnung eingeben'); return; }
       if(!boardId){ showToastMsg(`Bitte zuerst ein ${isFreezer?'Fach':'Brett'} anlegen`); return; }
       const targetContainer = containers.find(s=>s.id===document.getElementById('scanShelfSelect').value);
       const board = targetContainer.boards.find(b=>b.id===boardId);
       const newItem = {
         id:uid(), name, qty,
-        note:'', photo: pendingBarcodePhoto || null, barcode: code, unitsPerScan
+        note:'', photo: pendingBarcodePhoto || null, barcode: code, unitsPerScan, autoShop
       };
       if(!isFreezer) newItem.reihe = reiheRaw==='' ? null : Number(reiheRaw);
       board.items.push(newItem);
@@ -2146,6 +2300,7 @@ function attachAllHandlers(){
       const qty = Number(document.getElementById('formQty').value) || 0;
       const note = document.getElementById('formNote').value.trim();
       const unitsPerScan = Math.max(1, Number(document.getElementById('formUnitsUnitsPerScan').value) || 1);
+      const autoShop = document.getElementById('formUnitsAutoShop').checked;
       if(!name){ showToastMsg('Bitte eine Bezeichnung eingeben'); return; }
       const reihe = reiheRaw === '' ? null : Number(reiheRaw);
 
@@ -2160,10 +2315,10 @@ function attachAllHandlers(){
 
       if(iid){
         const item = findItem(sid,bid,iid);
-        item.name = name; item.qty = qty; item.note = note; item.reihe = reihe; item.photo = finalPhoto; item.unitsPerScan = unitsPerScan;
+        item.name = name; item.qty = qty; item.note = note; item.reihe = reihe; item.photo = finalPhoto; item.unitsPerScan = unitsPerScan; item.autoShop = autoShop;
       } else {
         const board = findBoard(sid,bid);
-        board.items.push({id:uid(), name, qty, note, reihe, photo: finalPhoto, unitsPerScan});
+        board.items.push({id:uid(), name, qty, note, reihe, photo: finalPhoto, unitsPerScan, autoShop});
       }
       editingItem = null; addingItemFor = null; pendingPhoto = null;
       queueSave(); render();
