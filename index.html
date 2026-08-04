@@ -93,6 +93,10 @@ main{padding:8px 4px 0;}
 .item-top-line{display:flex; align-items:center; gap:6px; flex-wrap:wrap;}
 .item-name{font-size:14.5px; font-weight:500; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;}
 .reihe-badge{font-family:'JetBrains Mono',monospace; font-size:10px; color:var(--sage); background:var(--sage-soft); padding:1px 6px; border-radius:10px; flex:0 0 auto;}
+.expiry-badge{font-family:'JetBrains Mono',monospace; font-size:10px; padding:1px 6px; border-radius:10px; flex:0 0 auto;}
+.expiry-badge.expiry-ok{color:var(--ink-soft); background:var(--surface-alt);}
+.expiry-badge.expiry-soon{color:var(--accent); background:var(--accent-soft);}
+.expiry-badge.expiry-expired{color:var(--danger); background:var(--danger-soft);}
 .item-note{font-size:12px; color:var(--ink-soft); margin-top:1px;}
 .qty-stepper{display:flex; align-items:center; background:var(--surface-alt); border-radius:8px; flex:0 0 auto;}
 .qty-stepper button{border:none; background:transparent; cursor:pointer; width:24px; height:24px; font-size:14px; color:var(--accent); font-weight:700;}
@@ -352,7 +356,7 @@ let editingFreezerItem = null;   // {freezerId, boardId, itemId}
 let addingFreezerItemFor = null; // {freezerId, boardId}
 let addingFreezer = false;
 
-let shoppingListData = { threshold: 3, dismissed: {}, manual: [] };
+let shoppingListData = { threshold: 3, warnDays: 7, dismissed: {}, dismissedExpiry: {}, manual: [] };
 let saveTimerShopping = null;
 
 let scanStream = null;
@@ -365,6 +369,24 @@ let lastScan = {code:null, time:0};
 function uid(){ return Date.now().toString(36) + Math.random().toString(36).slice(2,7); }
 function boardLetter(idx){ return String.fromCharCode(65 + idx); }
 function escapeHtml(s){ return (s||'').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])); }
+
+function daysUntil(dateStr){
+  if(!dateStr) return null;
+  const today = new Date(); today.setHours(0,0,0,0);
+  const target = new Date(dateStr + 'T00:00:00');
+  return Math.round((target - today) / 86400000);
+}
+
+function expiryBadgeHtml(expiryDate){
+  if(!expiryDate) return '';
+  const days = daysUntil(expiryDate);
+  let cls = 'ok', text;
+  if(days < 0){ cls = 'expired'; text = `abgelaufen (${Math.abs(days)}T)`; }
+  else if(days === 0){ cls = 'expired'; text = 'läuft heute ab'; }
+  else if(days <= 7){ cls = 'soon'; text = `noch ${days}T haltbar`; }
+  else { cls = 'ok'; text = `haltbar bis ${expiryDate.split('-').reverse().join('.')}`; }
+  return `<span class="expiry-badge expiry-${cls}">${text}</span>`;
+}
 
 async function loadData(){
   const res = await fsGetDoc('inventory');
@@ -389,11 +411,13 @@ async function loadShoppingListData(){
   if(res){
     shoppingListData = {
       threshold: typeof res.threshold === 'number' ? res.threshold : 3,
+      warnDays: typeof res.warnDays === 'number' ? res.warnDays : 7,
       dismissed: res.dismissed || {},
+      dismissedExpiry: res.dismissedExpiry || {},
       manual: Array.isArray(res.manual) ? res.manual : []
     };
   } else {
-    shoppingListData = { threshold: 3, dismissed: {}, manual: [] };
+    shoppingListData = { threshold: 3, warnDays: 7, dismissed: {}, dismissedExpiry: {}, manual: [] };
   }
 }
 
@@ -955,6 +979,7 @@ function renderItem(shelf, board, item){
       <div class="item-top-line">
         <span class="item-name">${escapeHtml(item.name)}</span>
         ${item.reihe !== '' && item.reihe != null ? `<span class="reihe-badge">Reihe ${escapeHtml(String(item.reihe))}</span>` : ''}
+        ${expiryBadgeHtml(item.expiryDate)}
       </div>
       ${item.note ? `<div class="item-note">${escapeHtml(item.note)}</div>` : ''}
       ${isConfirming ? `
@@ -966,7 +991,7 @@ function renderItem(shelf, board, item){
     </div>
     <div class="qty-stepper">
       <button data-qty-dec="${shelf.id}:${board.id}:${item.id}">−</button>
-      <span class="qty-val">${item.qty}</span>
+      <span class="qty-val">${item.qty} ${unitAbbrev(item.unit)}</span>
       <button data-qty-inc="${shelf.id}:${board.id}:${item.id}">+</button>
     </div>
     <div class="item-actions">
@@ -974,6 +999,13 @@ function renderItem(shelf, board, item){
       <button class="icon-btn danger" data-del-item="${shelf.id}:${board.id}:${item.id}">🗑</button>
     </div>
   </div>`;
+}
+
+const UNIT_OPTIONS = ['Stück','g','kg','ml','l','Packung'];
+function unitAbbrev(u){ return ({'Stück':'Stk','Packung':'Pkg'})[u] || u || 'Stk'; }
+function renderUnitSelect(idPrefix, currentUnit){
+  const val = currentUnit || 'Stück';
+  return `<select id="${idPrefix}Unit">${UNIT_OPTIONS.map(u=>`<option value="${u}" ${u===val?'selected':''}>${u}</option>`).join('')}</select>`;
 }
 
 function renderAutoShopCheckbox(idPrefix, currentValue){
@@ -997,7 +1029,12 @@ function renderItemForm(shelf, board, item){
       <label>Reihe (optional)</label>
       <input type="number" id="formReihe" placeholder="z.B. 2" value="${isEdit && item.reihe!=null ? escapeHtml(String(item.reihe)) : ''}">
       <label>Menge</label>
-      <input type="number" id="formQty" placeholder="Anzahl" value="${isEdit ? item.qty : 1}" min="0">
+      <div class="edit-form-row">
+        <input type="number" id="formQty" placeholder="Anzahl" value="${isEdit ? item.qty : 1}" min="0" style="flex:1;">
+        ${renderUnitSelect('form', isEdit ? item.unit : 'Stück')}
+      </div>
+      <label>Haltbar bis (optional)</label>
+      <input type="date" id="formExpiry" value="${isEdit && item.expiryDate ? item.expiryDate : ''}">
       ${renderUnitsPerScanField('formUnits', isEdit ? item.unitsPerScan : 1, false, null)}
       ${renderAutoShopCheckbox('formUnits', isEdit ? item.autoShop : true)}
       <label>Notiz (optional)</label>
@@ -1060,7 +1097,7 @@ function renderSearchResults(term){
       <span class="hit-loc-badge" data-jump-to-shelf="${h.shelf.id}:${h.board.id}" style="cursor:pointer;">${escapeHtml(h.shelf.name)} · ${h.letter}${h.item.reihe!=null && h.item.reihe!=='' ? ('/'+escapeHtml(String(h.item.reihe))) : ''} ↗</span>
       <div class="qty-stepper">
         <button data-qty-dec="${h.shelf.id}:${h.board.id}:${h.item.id}">−</button>
-        <span class="qty-val">${h.item.qty}</span>
+        <span class="qty-val">${h.item.qty} ${unitAbbrev(h.item.unit)}</span>
         <button data-qty-inc="${h.shelf.id}:${h.board.id}:${h.item.id}">+</button>
       </div>
     </div>`;
@@ -1331,7 +1368,7 @@ function renderFreezerSearchResults(term){
       <span class="hit-loc-badge">${escapeHtml(h.freezer.name)} · ${h.letter}</span>
       <div class="qty-stepper">
         <button data-freezer-qty-dec="${h.freezer.id}:${h.board.id}:${h.item.id}">−</button>
-        <span class="qty-val">${h.item.qty}</span>
+        <span class="qty-val">${h.item.qty} ${unitAbbrev(h.item.unit)}</span>
         <button data-freezer-qty-inc="${h.freezer.id}:${h.board.id}:${h.item.id}">+</button>
       </div>
     </div>`;
@@ -1435,6 +1472,7 @@ function renderFreezerItem(freezer, board, item){
     <div class="item-main">
       <div class="item-top-line">
         <span class="item-name">${escapeHtml(item.name)}</span>
+        ${expiryBadgeHtml(item.expiryDate)}
       </div>
       ${item.note ? `<div class="item-note">${escapeHtml(item.note)}</div>` : ''}
       ${isConfirming ? `
@@ -1446,7 +1484,7 @@ function renderFreezerItem(freezer, board, item){
     </div>
     <div class="qty-stepper">
       <button data-freezer-qty-dec="${freezer.id}:${board.id}:${item.id}">−</button>
-      <span class="qty-val">${item.qty}</span>
+      <span class="qty-val">${item.qty} ${unitAbbrev(item.unit)}</span>
       <button data-freezer-qty-inc="${freezer.id}:${board.id}:${item.id}">+</button>
     </div>
     <div class="item-actions">
@@ -1465,7 +1503,12 @@ function renderFreezerItemForm(freezer, board, item){
       <label>Bezeichnung</label>
       <input type="text" id="fzFormName" placeholder="Bezeichnung" value="${isEdit?escapeHtml(item.name):''}">
       <label>Menge</label>
-      <input type="number" id="fzFormQty" placeholder="Anzahl" value="${isEdit ? item.qty : 1}" min="0">
+      <div class="edit-form-row">
+        <input type="number" id="fzFormQty" placeholder="Anzahl" value="${isEdit ? item.qty : 1}" min="0" style="flex:1;">
+        ${renderUnitSelect('fzForm', isEdit ? item.unit : 'Stück')}
+      </div>
+      <label>Haltbar bis (optional)</label>
+      <input type="date" id="fzFormExpiry" value="${isEdit && item.expiryDate ? item.expiryDate : ''}">
       ${renderUnitsPerScanField('fzFormUnits', isEdit ? item.unitsPerScan : 1, false, null)}
       ${renderAutoShopCheckbox('fzFormUnits', isEdit ? item.autoShop : true)}
       <label>Notiz (optional)</label>
@@ -1624,7 +1667,9 @@ function attachFreezerHandlers(){
     document.getElementById('fzFormSave').addEventListener('click', ()=>{
       const name = document.getElementById('fzFormName').value.trim();
       const qty = Number(document.getElementById('fzFormQty').value) || 0;
+      const unit = document.getElementById('fzFormUnit').value;
       const note = document.getElementById('fzFormNote').value.trim();
+      const expiryDate = document.getElementById('fzFormExpiry').value || null;
       const unitsPerScan = Math.max(1, Number(document.getElementById('fzFormUnitsUnitsPerScan').value) || 1);
       const autoShop = document.getElementById('fzFormUnitsAutoShop').checked;
       if(!name){ showToastMsg('Bitte eine Bezeichnung eingeben'); return; }
@@ -1637,9 +1682,9 @@ function attachFreezerHandlers(){
       const board = freezerData.freezers.find(f=>f.id===fid).boards.find(b=>b.id===bid);
       if(iid){
         const item = board.items.find(i=>i.id===iid);
-        item.name = name; item.qty = qty; item.note = note; item.photo = finalPhoto; item.unitsPerScan = unitsPerScan; item.autoShop = autoShop;
+        item.name = name; item.qty = qty; item.unit = unit; item.note = note; item.photo = finalPhoto; item.unitsPerScan = unitsPerScan; item.autoShop = autoShop; item.expiryDate = expiryDate;
       } else {
-        board.items.push({id:uid(), name, qty, note, photo: finalPhoto, unitsPerScan, autoShop});
+        board.items.push({id:uid(), name, qty, unit, note, photo: finalPhoto, unitsPerScan, autoShop, expiryDate});
       }
       editingFreezerItem = null; addingFreezerItemFor = null; pendingPhoto = null;
       queueSaveFreezer(); render();
@@ -1688,7 +1733,7 @@ function collectLowStockItems(){
         if(item.autoShop === false) return;
         const qty = Number(item.qty)||0;
         if(qty <= threshold){
-          results.push({ id:item.id, name:item.name, qty, location: `${shelf.name} · ${letter}` });
+          results.push({ id:item.id, name:item.name, qty, unit:item.unit, location: `${shelf.name} · ${letter}` });
         }
       });
     });
@@ -1701,7 +1746,7 @@ function collectLowStockItems(){
         if(item.autoShop === false) return;
         const qty = Number(item.qty)||0;
         if(qty <= threshold){
-          results.push({ id:item.id, name:item.name, qty, location: `${fz.name} · Fach ${letter}` });
+          results.push({ id:item.id, name:item.name, qty, unit:item.unit, location: `${fz.name} · Fach ${letter}` });
         }
       });
     });
@@ -1711,12 +1756,50 @@ function collectLowStockItems(){
   return results.filter(r => shoppingListData.dismissed[r.id] !== r.qty);
 }
 
+function collectExpiringItems(){
+  const results = [];
+  const warnDays = Number(shoppingListData.warnDays) || 7;
+
+  data.shelves.forEach(shelf=>{
+    let realIdx = 0;
+    shelf.boards.forEach(board=>{
+      const letter = board.floor ? 'Boden' : boardLetter(realIdx);
+      if(!board.floor) realIdx++;
+      board.items.forEach(item=>{
+        if(!item.expiryDate) return;
+        const days = daysUntil(item.expiryDate);
+        if(days <= warnDays){
+          results.push({ id:item.id, name:item.name, days, expiryDate:item.expiryDate, location: `${shelf.name} · ${letter}` });
+        }
+      });
+    });
+  });
+
+  freezerData.freezers.forEach(fz=>{
+    fz.boards.forEach((board, idx)=>{
+      const letter = boardLetter(idx);
+      board.items.forEach(item=>{
+        if(!item.expiryDate) return;
+        const days = daysUntil(item.expiryDate);
+        if(days <= warnDays){
+          results.push({ id:item.id, name:item.name, days, expiryDate:item.expiryDate, location: `${fz.name} · Fach ${letter}` });
+        }
+      });
+    });
+  });
+
+  results.sort((a,b)=>a.days-b.days);
+  return results.filter(r => shoppingListData.dismissedExpiry[r.id] !== r.expiryDate);
+}
+
 function renderShoppingListTab(term){
   const t = (term||'').toLowerCase();
   let lowStock = collectLowStockItems();
+  let expiring = collectExpiringItems();
   let manual = shoppingListData.manual;
   if(t){
     lowStock = lowStock.filter(r=>r.name.toLowerCase().includes(t));
+    expiring = expiring.filter(r=>r.name.toLowerCase().includes(t));
     manual = manual.filter(m=>m.name.toLowerCase().includes(t));
   }
   return `
@@ -1725,6 +1808,25 @@ function renderShoppingListTab(term){
       <input type="number" id="thresholdInput" value="${shoppingListData.threshold}" min="0">
       ist
     </div>
+    <div class="threshold-row">
+      Vor Ablauf warnen, wenn noch ≤
+      <input type="number" id="warnDaysInput" value="${shoppingListData.warnDays}" min="0">
+      Tage haltbar
+    </div>
+
+    <div class="section-label">⏰ Läuft bald ab</div>
+    ${expiring.length === 0
+      ? `<div style="color:var(--ink-soft); font-size:12.5px; padding:2px 2px 12px;">${t ? 'Nichts gefunden.' : 'Gerade läuft nichts ab.'}</div>`
+      : expiring.map(r => `
+        <div class="shop-item">
+          <button class="shop-check" data-dismiss-expiry="${r.id}:${r.expiryDate}" title="Erledigt">✓</button>
+          <div class="shop-main">
+            <div class="shop-name">${escapeHtml(r.name)}</div>
+            <div class="shop-sub">${escapeHtml(r.location)} · ${r.days < 0 ? `seit ${Math.abs(r.days)} Tagen abgelaufen` : r.days === 0 ? 'läuft heute ab' : `noch ${r.days} Tage haltbar`}</div>
+          </div>
+        </div>
+      `).join('')
+    }
 
     <div class="section-label">Wird knapp (automatisch)</div>
     ${lowStock.length === 0
@@ -1734,7 +1836,7 @@ function renderShoppingListTab(term){
           <button class="shop-check" data-dismiss-low="${r.id}:${r.qty}" title="Erledigt">✓</button>
           <div class="shop-main">
             <div class="shop-name">${escapeHtml(r.name)}</div>
-            <div class="shop-sub">${escapeHtml(r.location)} · noch ${r.qty}</div>
+            <div class="shop-sub">${escapeHtml(r.location)} · noch ${r.qty} ${unitAbbrev(r.unit)}</div>
           </div>
         </div>
       `).join('')
@@ -1765,6 +1867,22 @@ function attachShoppingListHandlers(){
     queueSaveShopping();
     render();
   });
+
+  const warnDaysInput = document.getElementById('warnDaysInput');
+  warnDaysInput.addEventListener('change', ()=>{
+    const val = Math.max(0, Number(warnDaysInput.value) || 0);
+    shoppingListData.warnDays = val;
+    queueSaveShopping();
+    render();
+  });
+
+  document.querySelectorAll('[data-dismiss-expiry]').forEach(el=>el.addEventListener('click', ()=>{
+    const [id, expiryDate] = el.getAttribute('data-dismiss-expiry').split(':');
+    shoppingListData.dismissedExpiry[id] = expiryDate;
+    queueSaveShopping();
+    showToastMsg('Erledigt');
+    render();
+  }));
 
   document.querySelectorAll('[data-dismiss-low]').forEach(el=>el.addEventListener('click', ()=>{
     const [id, qty] = el.getAttribute('data-dismiss-low').split(':');
@@ -2104,7 +2222,12 @@ async function showNewBarcodeItemForm(code){
         <label>Reihe (optional)</label>
         <input type="number" id="scanReihe" placeholder="z.B. 2">`}
         <label>Menge</label>
-        <input type="number" id="scanQty" value="1" min="0">
+        <div class="edit-form-row">
+          <input type="number" id="scanQty" value="1" min="0" style="flex:1;">
+          ${renderUnitSelect('scan', 'Stück')}
+        </div>
+        <label>Haltbar bis (optional)</label>
+        <input type="date" id="scanExpiry">
         ${renderUnitsPerScanField(
           'scanUnits',
           (offResult && offResult.detectedUnits) || 1,
@@ -2139,6 +2262,8 @@ async function showNewBarcodeItemForm(code){
       const boardId = document.getElementById('scanBoardSelect').value;
       const reiheRaw = isFreezer ? '' : document.getElementById('scanReihe').value;
       const qty = Number(document.getElementById('scanQty').value) || 0;
+      const unit = document.getElementById('scanUnit').value;
+      const expiryDate = document.getElementById('scanExpiry').value || null;
       const unitsPerScan = Math.max(1, Number(document.getElementById('scanUnitsUnitsPerScan').value) || 1);
       const autoShop = document.getElementById('scanUnitsAutoShop').checked;
       if(!name){ showToastMsg('Bitte eine Bezeichnung eingeben'); return; }
@@ -2146,8 +2271,8 @@ async function showNewBarcodeItemForm(code){
       const targetContainer = containers.find(s=>s.id===document.getElementById('scanShelfSelect').value);
       const board = targetContainer.boards.find(b=>b.id===boardId);
       const newItem = {
-        id:uid(), name, qty,
-        note:'', photo: pendingBarcodePhoto || null, barcode: code, unitsPerScan, autoShop
+        id:uid(), name, qty, unit,
+        note:'', photo: pendingBarcodePhoto || null, barcode: code, unitsPerScan, autoShop, expiryDate
       };
       if(!isFreezer) newItem.reihe = reiheRaw==='' ? null : Number(reiheRaw);
       board.items.push(newItem);
@@ -2298,7 +2423,9 @@ function attachAllHandlers(){
       const name = document.getElementById('formName').value.trim();
       const reiheRaw = document.getElementById('formReihe').value;
       const qty = Number(document.getElementById('formQty').value) || 0;
+      const unit = document.getElementById('formUnit').value;
       const note = document.getElementById('formNote').value.trim();
+      const expiryDate = document.getElementById('formExpiry').value || null;
       const unitsPerScan = Math.max(1, Number(document.getElementById('formUnitsUnitsPerScan').value) || 1);
       const autoShop = document.getElementById('formUnitsAutoShop').checked;
       if(!name){ showToastMsg('Bitte eine Bezeichnung eingeben'); return; }
@@ -2315,10 +2442,10 @@ function attachAllHandlers(){
 
       if(iid){
         const item = findItem(sid,bid,iid);
-        item.name = name; item.qty = qty; item.note = note; item.reihe = reihe; item.photo = finalPhoto; item.unitsPerScan = unitsPerScan; item.autoShop = autoShop;
+        item.name = name; item.qty = qty; item.unit = unit; item.note = note; item.reihe = reihe; item.photo = finalPhoto; item.unitsPerScan = unitsPerScan; item.autoShop = autoShop; item.expiryDate = expiryDate;
       } else {
         const board = findBoard(sid,bid);
-        board.items.push({id:uid(), name, qty, note, reihe, photo: finalPhoto, unitsPerScan, autoShop});
+        board.items.push({id:uid(), name, qty, unit, note, reihe, photo: finalPhoto, unitsPerScan, autoShop, expiryDate});
       }
       editingItem = null; addingItemFor = null; pendingPhoto = null;
       queueSave(); render();
